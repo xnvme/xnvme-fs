@@ -125,5 +125,9 @@ def main(args, cijoe):
     if not ok:
         log.error("could not copy the artifacts into the guest")
         return errno.EIO
-    err, _ = cijoe.run("sudo tar -xzf /tmp/xnvme-fs-artifacts.tgz -C / && rm /tmp/xnvme-fs-artifacts.tgz")
+    # --no-same-owner: xnvme runs an xnvme-<name> program only from a directory owned by root or by the user running
+    # xnvme, and the archive records the uid of the user who built it
+    err, _ = cijoe.run(
+        "sudo tar -xzf /tmp/xnvme-fs-artifacts.tgz --no-same-owner -C / && rm /tmp/xnvme-fs-artifacts.tgz"
+    )
     return err
