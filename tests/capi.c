@@ -14,8 +14,17 @@
 //
 //   xnvme-test-fs-capi POOL
 
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE // memfd_create() and the file seals
+#endif
 #include <libxnvme_fs.h>
 
+#ifdef XNVME_FS_DMABUF
+#include <fcntl.h>
+#include <linux/udmabuf.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#endif
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -410,6 +419,76 @@ main(int argc, char **argv)
 		}
 		free(data);
 	}
+
+#ifdef XNVME_FS_DMABUF
+	{
+		// A direct read into a udmabuf registered under a PROT_NONE range, which faults on any
+		// access; XNVME_FS_DMABUF_REQUIRED makes each skip a failure
+		uint32_t bs = xnvme_fs_block_size(s);
+		size_t len = 3 * MIB + 3 * bs + 100;
+		unsigned char *data = malloc(len);
+		void *mapped = MAP_FAILED, *reserved = MAP_FAILED;
+		int udev = open("/dev/udmabuf", O_RDWR | O_CLOEXEC);
+		int memfd = -1, fd = -1, err;
+		struct xnvme_fs_file *d = NULL;
+
+		for (size_t i = 0; data && i < len; i++) {
+			data[i] = (unsigned char)((i * 29 + 11) ^ (i >> 9) ^ (i >> 17));
+		}
+		if (udev < 0) {
+			CHECK(!getenv("XNVME_FS_DMABUF_REQUIRED"));
+			printf("skipped: a direct read into a dma-buf, no /dev/udmabuf\n");
+		} else {
+			struct udmabuf_create create = {0};
+
+			memfd = memfd_create("xnvme-fs-capi", MFD_ALLOW_SEALING | MFD_CLOEXEC);
+			CHECK(memfd >= 0 && ftruncate(memfd, 2 * MIB) == 0 &&
+			      fcntl(memfd, F_ADD_SEALS, F_SEAL_SHRINK) == 0);
+			create.memfd = memfd;
+			create.size = 2 * MIB;
+			fd = memfd >= 0 ? ioctl(udev, UDMABUF_CREATE, &create) : -1;
+			CHECK(fd >= 0);
+			mapped = mmap(NULL, 2 * MIB, PROT_READ | PROT_WRITE, MAP_SHARED, memfd, 0);
+			reserved = mmap(NULL, 2 * MIB, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			CHECK(data && mapped != MAP_FAILED && reserved != MAP_FAILED);
+			CHECK(xnvme_fs_open(s, "capi/direct", 0, &d) == 0 && d != NULL);
+		}
+		if (d && fd >= 0 && data && mapped != MAP_FAILED && reserved != MAP_FAILED) {
+			err = xnvme_fs_register_dmabuf(s, fd, reserved);
+			if (err && !getenv("XNVME_FS_DMABUF_REQUIRED")) {
+				printf("skipped: a direct read into a dma-buf, registering it: %s (%s)\n",
+				       strerror(-err), xnvme_fs_errmsg());
+			} else {
+				CHECK(err == 0);
+				memset(mapped, 0, 2 * MIB);
+				CHECK(err == 0 &&
+				      xnvme_fs_submit_direct(d, a, reserved, 2 * MIB, MIB - bs) == 0 &&
+				      xnvme_fs_wait(a) == 2 * MIB);
+				CHECK(memcmp(mapped, data + MIB - bs, 2 * MIB) == 0);
+				CHECK(err || xnvme_fs_unregister_dmabuf(s, reserved) == 0);
+			}
+		}
+		if (d) {
+			xnvme_fs_close(d);
+		}
+		if (reserved != MAP_FAILED) {
+			munmap(reserved, 2 * MIB);
+		}
+		if (mapped != MAP_FAILED) {
+			munmap(mapped, 2 * MIB);
+		}
+		if (fd >= 0) {
+			close(fd);
+		}
+		if (memfd >= 0) {
+			close(memfd);
+		}
+		if (udev >= 0) {
+			close(udev);
+		}
+		free(data);
+	}
+#endif
 
 	// Names: a directory made, its entries listed, a file renamed while open, then removed
 	{
