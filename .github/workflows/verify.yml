@@ -1,0 +1,166 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+name: verify
+
+# The jobs have the names of the corresponding jobs of xNVMe's 'verify', because ci-result evaluates the run with
+# xNVMe's toolbox/gha_gates.py, which requires source-checks and docgen-shallow by name. A push to main runs
+# verify-emulated without the test suites; that run saves the ccache that the runs of pull requests restore.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: verify-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # A pull request that changes only files under docs/ and adapters/docs/ and Markdown files at the top level needs
+  # no build and no guest. verify-nvme-pcie-emulated reads docs_prose_only, and runs for a release pull request
+  # whatever it changes.
+  changes-to-docs:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-26.04
+    outputs:
+      docs_prose_only: ${{ steps.classify.outputs.docs_prose_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: Classify the change
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          docs_prose_only=false
+          : > changed.txt
+          if [ "$EVENT" = "pull_request" ]; then
+            git diff --name-only --no-renames "$PR_BASE...HEAD" > changed.txt || : > changed.txt
+          fi
+          cat changed.txt
+          if [ -s changed.txt ] && ! grep -qvE '^(docs/|adapters/docs/|[^/]+\.md$)' changed.txt; then
+            docs_prose_only=true
+          fi
+          echo "docs_prose_only=$docs_prose_only" | tee -a "$GITHUB_OUTPUT"
+
+  # The version is set when the last commit of the pull request is "ver: bump to v<version>". The job then fails
+  # unless meson.build has that version, CHANGELOG.md has a section for it, and the branch has every commit of main,
+  # so that the merge gives main the tree this run tests. ci-result requires every job to pass when the version is
+  # set. The gates job of xNVMe also evaluates labels; no job of xnvme fs depends on a label.
+  gates:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-26.04
+    outputs:
+      version: ${{ steps.ready.outputs.version }}
+    steps:
+      - name: Grab the head of the pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Check whether the pull request releases a version
+        id: ready
+        if: github.event_name == 'pull_request'
+        uses: refenv/gha-project-auto-release/ready@v1
+        with:
+          version-file: meson.build
+          version-pattern: "^  version: '([^']+)',$"
+
+  # publish-release attaches this archive to the release. git archive does not include the submodules DuckDB,
+  # extension-ci-tools and RocksDB; .gitmodules in the archive names them.
+  source-archive:
+    needs: changes-to-docs
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Make the source archive and its checksum
+        run: |
+          version=$(sed -nE "s/^  version: '([^']+)',$/\1/p" meson.build)
+          git archive --format=tar.gz --prefix="xnvme-fs-$version/" -o "xnvme-fs-$version.tar.gz" HEAD
+          sha256sum "xnvme-fs-$version.tar.gz" | tee "xnvme-fs-$version.tar.gz.sha256sum"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-archive
+          path: xnvme-fs-*.tar.gz*
+          if-no-files-found: error
+
+  source-checks:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-26.04
+    container: ghcr.io/xnvme/xnvme-devenv/host:v0.15.0
+    steps:
+      # adapters/.clang-format is a symbolic link into the DuckDB submodule
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: pre-commit
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          pre-commit run --all-files
+      # required-version in cijoe/ruff.toml is this version
+      - name: ruff on the cijoe scripts
+        run: pipx run ruff==0.17.3 check cijoe
+      # gates and publish-release read the version from meson.build with this pattern. Without this step, a change
+      # to meson.build that the pattern no longer matches would first fail on the next release pull request.
+      - name: The version pattern finds the version in meson.build
+        run: |
+          grep -E "^  version: '([^']+)',$" meson.build
+
+  # publish-release attaches the docgen-html artifact of a release pull request's run to the release
+  docgen-shallow:
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-26.04
+    container: ghcr.io/xnvme/xnvme-devenv/host:v0.15.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the documentation
+        run: make -C adapters/docs html
+      - name: Archive the documentation
+        run: tar -czf docs-html.tar.gz -C adapters/docs/_build html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docgen-html
+          path: docs-html.tar.gz
+          if-no-files-found: error
+
+  verify-nvme-pcie-emulated:
+    needs: [changes-to-docs, gates]
+    if: needs.changes-to-docs.outputs.docs_prose_only != 'true' || needs.gates.outputs.version != ''
+    uses: ./.github/workflows/verify-emulated.yml
+    with:
+      suites: ${{ github.event_name != 'push' }}
+
+  # toolbox/gha_gates.py of the xNVMe release named below fails a run in which a job failed or was cancelled, a
+  # pull request in which source-checks or docgen-shallow did not pass, and a release pull request in which any job
+  # did not pass. publish-release requires this job.
+  ci-result:
+    needs: [changes-to-docs, gates, source-archive, source-checks, docgen-shallow, verify-nvme-pcie-emulated]
+    runs-on: ubuntu-26.04
+    if: always() && github.event.pull_request.draft != true
+    steps:
+      - name: Grab xNVMe's toolbox/gha_gates.py
+        uses: actions/checkout@v4
+        with:
+          repository: xnvme/xnvme
+          ref: v0.8.0
+          sparse-checkout: toolbox/gha_gates.py
+          sparse-checkout-cone-mode: false
+      - name: Check the results of the jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+          VERSION: ${{ needs.gates.outputs.version }}
+        run: python3 toolbox/gha_gates.py verdict --event "$EVENT" --version "$VERSION" <<< "$RESULTS"

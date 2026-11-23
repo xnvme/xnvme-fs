@@ -69,7 +69,7 @@ The prefix of xNVMe, the binaries and the test data come from a tree that
 QEMU, oras and cijoe. `configs/qemu-guest.toml` describes the guest and its
 controllers. The machine needs KVM, docker, and local storage for the tree and
 the images. `adapters/docs/reproducing.md` has the commands, which are the
-ones that `.github/workflows/xnvme-fs.yml` runs.
+ones that `.github/workflows/verify-emulated.yml` runs.
 
 The workflow `xnvme-fs-trace` runs the trace suite alone in the same guest
 and builds the table of I/O patterns from the trace.

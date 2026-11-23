@@ -77,3 +77,22 @@ The file system and its cijoe workflows are licensed BSD-3-Clause, the
 adapters MIT, and the documentation CC-BY-4.0. `REUSE.toml` and the header of
 each file state the license of the file. The license texts are in
 `LICENSES/`.
+
+## Releasing
+
+A release is made by merging a release pull request. The last commit of a
+release pull request has the subject `ver: bump to v<version>`, sets that
+version in `meson.build`, and adds a section `## <version>` to
+`CHANGELOG.md`.
+
+On a release pull request, the job `gates` of `.github/workflows/verify.yml`
+fails unless both files name the version and the branch contains every commit
+of main. The job `ci-result` fails unless every job of the run passed. Merge
+the pull request by rebase once `ci-result` has passed.
+
+The workflow `publish-release` then runs on main. It checks that the pull
+request had the same tree as main and that the `ci-result` job of the pull
+request passed. It tags the commit `v<version>` and creates the GitHub
+Release, with the section of `CHANGELOG.md` as the release notes. It attaches
+the source archive, the documentation and the test results from the run of
+the pull request. The workflow uploads nothing to any other service.

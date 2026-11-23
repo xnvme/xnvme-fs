@@ -1,0 +1,60 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+name: publish-release
+
+# Releases xnvme fs when the commit "ver: bump to v<version>" is pushed to main, as xNVMe's 'publish-release' does.
+# The check step fails unless the bump is complete, the pull request that merged it had the tree of main, and
+# ci-result of 'verify' passed on the head of that pull request. The workflow then tags the commit and creates the
+# GitHub Release, with the section of CHANGELOG.md as its notes and the source archive, the documentation and the
+# test results of that run attached. It uploads nothing anywhere else.
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  release:
+    if: >-
+      startsWith(github.event.head_commit.message, 'ver: bump to v')
+    runs-on: ubuntu-26.04
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the bump and the pull request's run of verify
+        id: check
+        uses: refenv/gha-project-auto-release/check@v1
+        with:
+          version-file: meson.build
+          version-pattern: "^  version: '([^']+)',$"
+          workflows: verify.yml
+          jobs: "verify.yml: ci-result"
+      - name: Fetch the source archive, the documentation and the test results of that run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ fromJSON(steps.check.outputs.runs)['verify.yml'] }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          gh run download "$RUN" --name source-archive --dir release
+          gh run download "$RUN" --name docgen-html --dir docgen
+          mv docgen/docs-html.tar.gz "release/xnvme-fs-docs-$VERSION.tar.gz"
+          gh run download "$RUN" --name verify-emulated-reports --dir reports
+          tar -czf "release/xnvme-fs-test-results-$VERSION.tar.gz" -C reports .
+          ls -l release
+      - uses: refenv/gha-project-auto-release/release@v1
+        with:
+          version: ${{ steps.check.outputs.version }}
+          notes-file: ${{ steps.check.outputs.notes-file }}
+          assets: release/*

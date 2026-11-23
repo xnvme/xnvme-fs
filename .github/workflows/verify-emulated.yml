@@ -2,36 +2,40 @@
 #
 # SPDX-License-Identifier: MIT
 
-name: xnvme-fs
+name: verify-emulated
 
+# Called by 'verify'. The job builds xNVMe, xnvme fs and the adapters in a container of BUILD_IMAGE, and runs the
+# adapters' test suites in the guest of xnvme-devenv, which a container of DEVENV_IMAGE boots with the rig of
+# cijoe/configs/qemu-guest.toml. Both containers mount the workspace and /mnt/xnvme-fs at the paths these have on
+# the runner, so the second container finds the build tree where the first wrote it. The build and the suites are
+# one job, since the build tree is several GB.
 on:
-  push:
-    branches: [main]
-    paths: ["adapters/**", "cijoe/**", "include/**", "lib/**", "systemd/**", "tests/**", "tools/**", "subprojects/**", "meson.build",
-            "meson_options.txt", ".github/workflows/xnvme-fs.yml", "REUSE.toml", "LICENSES/**", ".gitmodules"]
-  pull_request:
-    paths: ["adapters/**", "cijoe/**", "include/**", "lib/**", "systemd/**", "tests/**", "tools/**", "subprojects/**", "meson.build",
-            "meson_options.txt", ".github/workflows/xnvme-fs.yml", "REUSE.toml", "LICENSES/**", ".gitmodules"]
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      suites:
+        description: Whether the test suites run in the guest after the build
+        type: boolean
+        required: true
+
+defaults:
+  run:
+    shell: bash
 
 # XNVME_REPOSITORY and XNVME_REF name the xNVMe that xnvme fs builds against and installs its extension into; no
 # other file names them. The branch api-pass of safl/xnvme adds to xNVMe's main the commit "feat(cli): let other
 # projects extend the commands of xnvme", and the spec headers and command preps that lib/layout.cpp uses.
+# BUILD_IMAGE is xNVMe's image with its dependencies for Ubuntu 26.04. DEVENV_IMAGE is the host container of the
+# xnvme-devenv release that xNVMe v0.8.0 pins.
 env:
   XNVME_REPOSITORY: safl/xnvme
   XNVME_REF: api-pass
-  # BUILD_IMAGE is xNVMe's image with its dependencies for Ubuntu 26.04. DEVENV_IMAGE is the host container of the
-  # xnvme-devenv release that xNVMe v0.8.0 pins; cijoe/configs/qemu-guest.toml describes the guest that it boots.
   BUILD_IMAGE: ghcr.io/xnvme/xnvme/distro-deps-ubuntu-resolute:main
   DEVENV_IMAGE: ghcr.io/xnvme/xnvme-devenv/host:v0.15.0
 
 jobs:
   # A pull request restores only its own caches and those of main, so the run on a push to main builds and saves
-  # the cache that pull requests restore. The guest suites run on pull requests and by hand only, since main moves
-  # only by fast-forward to a commit that a pull request tested. The build runs in a container of BUILD_IMAGE and the
-  # guest in a container of DEVENV_IMAGE; both mount the workspace and /mnt/xnvme-fs at the paths these have on the
-  # runner.
-  build-and-test:
+  # the cache that pull requests restore
+  verify:
     runs-on: ubuntu-26.04
     env:
       XNVME_FS_XNVME: ${{ github.workspace }}/xnvme
@@ -101,25 +105,26 @@ jobs:
       # The suites of the file system itself, cijoe/tests/test_fs.py, need four controllers and root in the guest;
       # this job does not run them
       - name: Run the test suites in xnvme-devenv's guest
-        if: github.event_name != 'push'
+        if: inputs.suites
         run: >-
           $RUN --privileged -w "$GITHUB_WORKSPACE/cijoe" "$DEVENV_IMAGE"
           cijoe workflows/xnvme-fs-guest.yaml -c configs/qemu-guest.toml -o /mnt/xnvme-fs/cijoe-output --skip-report
       # The containers run as root, and QEMU creates the guest's serial log readable by root only. The upload step
       # runs as the runner's user.
-      - if: always() && github.event_name != 'push'
+      - if: always() && inputs.suites
         name: Give the runner's user what the containers wrote
         run: sudo chown -R "$(id -u):$(id -g)" /mnt/xnvme-fs
       # The suites can fill the runner's disk through the sparse images of the guest's drives
-      - if: always() && github.event_name != 'push'
+      - if: always() && inputs.suites
         name: Show the runner's free space and the guest drives' allocation
         run: |
           df -h / /mnt
           du -h /mnt/xnvme-fs/guest/xnvme_fs/*.img || true
-      - if: always() && github.event_name != 'push'
+      # publish-release attaches the reports of a release pull request's run to the release
+      - if: always() && inputs.suites
         uses: actions/upload-artifact@v4
         with:
-          name: cijoe-output-guest
+          name: verify-emulated-reports
           path: |
             /mnt/xnvme-fs/cijoe-output-build
             /mnt/xnvme-fs/cijoe-output
@@ -130,24 +135,3 @@ jobs:
         with:
           path: .ccache
           key: ccache-${{ runner.os }}-${{ github.sha }}
-
-  lint:
-    runs-on: ubuntu-26.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-      - name: REUSE
-        uses: fsfe/reuse-action@v5
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: pre-commit
-        run: |
-          pip install pre-commit
-          pre-commit run --all-files
-      # required-version in cijoe/ruff.toml is this version
-      - name: ruff on the cijoe scripts
-        run: |
-          pip install ruff==0.17.3
-          ruff check cijoe
