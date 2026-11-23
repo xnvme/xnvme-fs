@@ -18,18 +18,21 @@ lets xNVMe run extensions; `XNVME_FS_XNVME` names the checkout when it is not
 ## What you need
 
 For building and for checking correctness, one Linux machine on x86-64 with
-KVM, QEMU (`qemu-system-x86`, `qemu-utils`), oras, cijoe 0.9.70
-(`pipx install cijoe==0.9.70`), what `adapters/scripts/ci-deps.sh` installs, and
-about 30 GB of local disk. No NVMe drive is needed and none is touched: the
-tests run inside a QEMU guest whose controllers are emulated.
+KVM, docker, and about 30 GB of local disk. The build runs in xNVMe's image
+with its dependencies for Ubuntu 26.04, and the tests in the host container of
+xnvme-devenv, as CI runs them. No NVMe drive is needed and none is touched: the
+tests run inside xnvme-devenv's QEMU guest, whose controllers are emulated.
 
 ## 1. Build
 
-    XNVME_FS_TREE=$HOME/.cache/xnvme-fs-tree cijoe workflows/xnvme-fs-build.yaml -c configs/local.toml \
-      -o cijoe-output-build --skip-report
+    docker run --rm -v $PWD/..:$PWD/.. -v $HOME/git/xnvme:$HOME/git/xnvme -v $HOME/.cache/xnvme-fs:$HOME/.cache/xnvme-fs \
+      -w $PWD -e XNVME_FS_TREE=$HOME/.cache/xnvme-fs/tree -e XNVME_FS_XNVME=$HOME/git/xnvme \
+      ghcr.io/xnvme/xnvme/distro-deps-ubuntu-resolute:main bash -euc '
+        git config --global --add safe.directory "*" && ../adapters/scripts/ci-deps.sh && pipx install cijoe==0.9.70
+        ~/.local/bin/cijoe workflows/xnvme-fs-build.yaml -c configs/local.toml -o cijoe-output-build --skip-report'
 
-The first step checks for what the guest needs; with `install: yes` in its
-`with:` it installs the missing packages. The second copies the two checkouts
+`adapters/scripts/ci-deps.sh` installs what the adapters need beyond xNVMe's
+dependencies. The workflow copies the two checkouts
 to `XNVME_FS_TREE`, builds xNVMe and installs it into the tree's prefix, builds xnvme fs
 from this checkout into the same prefix, and builds against that prefix the DuckDB extension with its
 tests, the benchmark and RocksDB with the plugin. It records the commits of
@@ -38,10 +41,12 @@ kept, and nothing is built again.
 
 ## 2. Check correctness
 
-    XNVME_FS_GUEST_ROOT=$HOME/.cache/xnvme-fs-guest XNVME_FS_TREE=$HOME/.cache/xnvme-fs-tree \
+    docker run --rm --privileged -v $PWD/..:$PWD/.. -v $HOME/.cache/xnvme-fs:$HOME/.cache/xnvme-fs -w $PWD \
+      -e XNVME_FS_TREE=$HOME/.cache/xnvme-fs/tree -e XNVME_FS_GUEST_ROOT=$HOME/.cache/xnvme-fs/guest \
+      ghcr.io/xnvme/xnvme-devenv/host:v0.15.0 \
       cijoe workflows/xnvme-fs-guest.yaml -c configs/qemu-guest.toml -o cijoe-output-guest --skip-report
 
-This boots an Ubuntu 26.04 guest with an IOMMU and two emulated NVMe controllers,
+This boots xnvme-devenv's Ubuntu 26.10 guest with an IOMMU and two emulated NVMe controllers,
 binds them to vfio-pci inside it, starts `xnvme homi serve` on them and runs
 each suite as a step on a pool of both, served by `xnvme fs serve`: DuckDB's
 sqllogictests with TPC-H SF1, DuckDB's storage tests, the extension's writes

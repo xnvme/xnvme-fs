@@ -24,7 +24,3 @@ ccache = "{{ local.env.get('XNVME_FS_CCACHE', '') }}"
 # The guest runs the binaries this machine builds. xNVMe links ISA-L when its build finds it, and the guest image
 # has no ISA-L.
 xnvme_options = "-Dwith-isal=disabled"
-
-[xnvme_fs.local]
-# What running the guest needs on this machine, beside oras
-packages = ["qemu-system-x86", "qemu-utils"]

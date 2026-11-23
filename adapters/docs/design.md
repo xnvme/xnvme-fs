@@ -460,8 +460,9 @@ The cijoe step `xnvme_fs_build` copies the checkouts of xNVMe and of this
 repository to the machine it targets and builds xNVMe, xnvme fs, the
 extension, `xnvme-fs-bench` and a Release `db_bench` in a tree on it.
 
-The guest suites also run without GitHub: `cijoe/workflows/xnvme-fs-build.yaml` with
-`configs/local.toml` checks what the machine needs and builds the tree; `xnvme-fs-guest.yaml` then runs every suite in the QEMU guest as CI
+The guest suites also run without GitHub:
+`cijoe/workflows/xnvme-fs-build.yaml` with `configs/local.toml` builds the
+tree; `xnvme-fs-guest.yaml` then runs every suite in the QEMU guest as CI
 does, off the machine's own drives. The guest needs KVM; under WSL2 that takes
 nested virtualization.
 

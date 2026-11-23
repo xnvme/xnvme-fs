@@ -57,21 +57,19 @@ step builds gflags v2.2.2 into the tree.
 ## The workflow xnvme-fs-guest
 
 The workflow `xnvme-fs-guest` runs the test suites of the adapters through
-uPCIe and HOMI without a physical drive. It boots a QEMU guest from xNVMe's
-Ubuntu 26.04 nosi image, with an IOMMU and two emulated NVMe controllers. The
-members of the pool are the two controllers. They are bound to vfio-pci inside
-the guest and served by `xnvme homi serve`. `xnvme fs serve`, DuckDB and
-RocksDB are clients of that HOMI server.
+uPCIe and HOMI without a physical drive. It boots the QEMU guest of
+xnvme-devenv, Ubuntu 26.10, with an IOMMU and two emulated NVMe controllers.
+The members of the pool are the two controllers. They are bound to vfio-pci
+inside the guest and served by `xnvme homi serve`. `xnvme fs serve`, DuckDB
+and RocksDB are clients of that HOMI server.
 
 The prefix of xNVMe, the binaries and the test data come from a tree that
-`xnvme-fs-build` built on the host. The machine needs KVM, QEMU, oras, and
-local storage for the tree and the images:
-
-```
-XNVME_FS_TREE=/mnt/xnvme-fs/tree cijoe workflows/xnvme-fs-build.yaml -c configs/local.toml -o cijoe-output-build --skip-report
-XNVME_FS_GUEST_ROOT=/mnt/xnvme-fs/guest XNVME_FS_TREE=/mnt/xnvme-fs/tree \
-  cijoe workflows/xnvme-fs-guest.yaml -c configs/qemu-guest.toml -o cijoe-output --skip-report
-```
+`xnvme-fs-build` built in xNVMe's image with its dependencies for Ubuntu
+26.04. The workflow runs in the host container of xnvme-devenv, which has
+QEMU, oras and cijoe. `configs/qemu-guest.toml` describes the guest and its
+controllers. The machine needs KVM, docker, and local storage for the tree and
+the images. `adapters/docs/reproducing.md` has the commands, which are the
+ones that `.github/workflows/xnvme-fs.yml` runs.
 
 The workflow `xnvme-fs-trace` runs the trace suite alone in the same guest
 and builds the table of I/O patterns from the trace.

@@ -5,9 +5,12 @@
 # a drive to spare, and in CI. The guest has an IOMMU, so its controllers can be bound to vfio-pci inside it.
 #
 # The images are written under XNVME_FS_GUEST_ROOT, which must be local storage (/mnt on a GitHub runner), not a
-# network file system. The guest is xNVMe's Ubuntu 26.04 nosi image. Its kernel has IOMMUFD and the device cdevs of
-# vfio, so uPCIe uses iommufd. The root account of the image is locked, so the workflows log in as the user 'odus'
-# and use sudo.
+# network file system. The guest image and the scripts that boot it with the rig below are xnvme-devenv's, so the
+# workflows run in the host container of xnvme-devenv, which has QEMU, oras and cijoe. The release of xnvme-devenv
+# is the one that xNVMe v0.8.0 pins.
+#
+# The guest is xnvme-devenv's Ubuntu 26.10 image. Its kernel has IOMMUFD and the device cdevs of vfio, so uPCIe uses
+# iommufd. The root account of the image is locked, so the workflows log in as the user 'odus' and use sudo.
 
 [cijoe.transport.guest]
 username = "odus"
@@ -18,7 +21,7 @@ port = 4210
 [qemu]
 img_bin = "qemu-img"
 default_guest = "xnvme_fs"
-default_systemimage = "ubuntu-2604-x86_64"
+default_systemimage = "ubuntu-2610-devenv-x86_64"
 
 [qemu.systems.x86_64]
 bin = "qemu-system-x86_64"
@@ -33,10 +36,31 @@ system_args.raw = """\
 """
 system_args.tcp_forward = {host = 4210, guest = 22}
 
-[system-imaging.images.ubuntu-2604-x86_64]
+[system-imaging.images.ubuntu-2610-devenv-x86_64]
 system_label = "x86_64"
-oras.url = "oras://ghcr.io/safl/nosi/ubuntu-2604-headless@sha256:904b425a0335e7a792d02e0bed543973d96bc01c08a16c9a4531da61cf098082"
-disk.path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/system_imaging/ubuntu-2604-x86_64.qcow2"
+oras.url = "oras://ghcr.io/xnvme/xnvme-devenv/guest-ubuntu-2610:v0.15.0"
+disk.path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/system_imaging/ubuntu-2610-devenv-x86_64.qcow2"
+
+# The rig that rig_guest_start of xnvme-devenv reads: two NVM controllers, each with one namespace of 4 KiB blocks.
+# Each controller is on a PCIe root port of its own, so the guest enumerates them as 0000:01:00.0 and 0000:02:00.0.
+# The backing images are sparse raw files next to the guest image. cache=none makes QEMU open them with O_DIRECT, so
+# a flush in the guest reaches the host's disk. The size defaults to 8G, since DuckDB's storage tests fill most of
+# two drives of 8G.
+[rig.devices.nvme0]
+provider = "qemu"
+device = "nvme,mdts=7,ioeventfd=on"
+serial = "xnvmefs0"
+drives = ["id=nvme0n1,file={{ local.env.XNVME_FS_GUEST_ROOT }}/xnvme_fs/nvme0n1.img,format=raw,if=none,discard=on,detect-zeroes=unmap,cache=none,aio=threads"]
+children = ["nvme-ns,drive=nvme0n1,nsid=1,logical_block_size=4096,physical_block_size=4096"]
+image = {path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/xnvme_fs/nvme0n1.img", size = "{{ local.env.get('XNVME_FS_GUEST_DRIVE', '8G') }}"}
+
+[rig.devices.nvme1]
+provider = "qemu"
+device = "nvme,mdts=7,ioeventfd=on"
+serial = "xnvmefs1"
+drives = ["id=nvme1n1,file={{ local.env.XNVME_FS_GUEST_ROOT }}/xnvme_fs/nvme1n1.img,format=raw,if=none,discard=on,detect-zeroes=unmap,cache=none,aio=threads"]
+children = ["nvme-ns,drive=nvme1n1,nsid=1,logical_block_size=4096,physical_block_size=4096"]
+image = {path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/xnvme_fs/nvme1n1.img", size = "{{ local.env.get('XNVME_FS_GUEST_DRIVE', '8G') }}"}
 
 [xnvme_fs]
 # The tree that workflows/xnvme-fs-build.yaml built on this host. xnvme_fs_guest_prepare copies the prefix of xNVMe
@@ -44,9 +68,6 @@ disk.path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/system_imaging/ubuntu-2604-x86_
 tree = "{{ local.env.XNVME_FS_TREE }}"
 
 [xnvme_fs.guest]
-controllers = 2                  # emulated NVMe controllers, one namespace each, each on a PCIe root port of its own
-# The size of the sparse raw backing image of each namespace. DuckDB's storage tests fill most of two drives of 8G.
-controller_size = "{{ local.env.get('XNVME_FS_GUEST_DRIVE', '8G') }}"
 hugepages = 256                  # 2 MiB hugepages reserved in the guest, for HOMI's DMA heap
 homi_id = 1
 homi_heap = 402653184            # bytes of HOMI's DMA heap; docs/getting-started.md says what a queue takes of it
