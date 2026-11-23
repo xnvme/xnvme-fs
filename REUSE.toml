@@ -12,7 +12,7 @@ SPDX-License-Identifier = "MIT"
 
 # Moved from xNVMe, where its REUSE.toml named them
 [[annotations]]
-path = ["cijoe/tests/test_fs.py", "cijoe/tests/__init__.py", "docs/fs.rst", "lib/libxnvme-fs.map"]
+path = ["cijoe/tests/test_fs.py", "cijoe/tests/__init__.py", "lib/libxnvme-fs.map"]
 SPDX-FileCopyrightText = "Samsung Electronics Co., Ltd"
 SPDX-License-Identifier = "BSD-3-Clause"
 

@@ -32,7 +32,7 @@ prints lists `xnvme fs`.
 | `tools/` | The program `xnvme-fs` with the commands `mkfs`, `serve`, `info` and `cp`, and the helpers `mkfs.xnvme-fs` and `mount.xnvme-fs`. |
 | `tests/` | The test programs, which run as `xnvme test fs-<name>`. |
 | `systemd/` | The unit `xnvme-fs@.service`, one instance per pool, and an example configuration. |
-| `docs/` | The documentation and `docs/fs.rst`, the manual of `xnvme fs`. The documentation is a Sphinx project in MyST Markdown, and `make -C docs html` builds it. |
+| `docs/` | The documentation: the concepts, the C API, the tools, the adapters and the design. It is a Sphinx project in MyST Markdown, and `make -C docs html` builds it. |
 | `adapters/` | The DuckDB extension, the RocksDB plugin, the C++ header that both use, and their tests. `adapters/README.md` describes how to build and run them. |
 | `cijoe/` | The cijoe workflows that build xnvme fs and run the adapters' test suites, and `tests/test_fs.py`, the test suites of the file system that need NVMe controllers. |
 

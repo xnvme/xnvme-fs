@@ -6,22 +6,28 @@ SPDX-License-Identifier: CC-BY-4.0
 
 # Reproducing the builds and the tests
 
-Building xNVMe, xnvme fs and the adapters, and testing them, runs as cijoe
-workflows under `cijoe/`. A workflow records the system it ran on and keeps
-every command and its output. Run the commands below from `cijoe/` in a
-checkout with its submodules (`git submodule update --init adapters/duckdb
-adapters/extension-ci-tools adapters/third_party/rocksdb`), beside a checkout
-of the branch `api-pass` of github.com/safl/xnvme, which has the commit that
-lets xNVMe run extensions; `XNVME_FS_XNVME` names the checkout when it is not
-`~/git/xnvme`.
+The builds of xNVMe, xnvme fs and the adapters, and their tests, are cijoe
+workflows under `cijoe/`. A cijoe run records the system that it ran on, and
+every command with its output.
+
+Run the commands below from `cijoe/`, in a checkout of this repository with
+its submodules:
+
+    git submodule update --init adapters/duckdb adapters/extension-ci-tools adapters/third_party/rocksdb
+
+The commands also need a checkout of the branch `api-pass` of
+github.com/safl/xnvme, which has the commit "feat(cli): let other projects
+extend the commands of xnvme". `XNVME_FS_XNVME` names that checkout when it
+is not at `~/git/xnvme`.
 
 ## What you need
 
-For building and for checking correctness, one Linux machine on x86-64 with
-KVM, docker, and about 30 GB of local disk. The build runs in xNVMe's image
-with its dependencies for Ubuntu 26.04, and the tests in the host container of
-xnvme-devenv, as CI runs them. No NVMe drive is needed and none is touched: the
-tests run inside xnvme-devenv's QEMU guest, whose controllers are emulated.
+Building and checking correctness need one Linux machine on x86-64 with KVM,
+docker, and about 30 GB of local disk. The build runs in xNVMe's image with
+its dependencies for Ubuntu 26.04. The tests run in the host container of
+xnvme-devenv, as they do in CI. The tests need no NVMe drive and write to
+none: they run inside the QEMU guest of xnvme-devenv, whose NVMe controllers
+are emulated.
 
 ## 1. Build
 
@@ -31,13 +37,20 @@ tests run inside xnvme-devenv's QEMU guest, whose controllers are emulated.
         git config --global --add safe.directory "*" && ../adapters/scripts/ci-deps.sh && pipx install cijoe==0.9.70
         ~/.local/bin/cijoe workflows/xnvme-fs-build.yaml -c configs/local.toml -o cijoe-output-build --skip-report'
 
-`adapters/scripts/ci-deps.sh` installs what the adapters need beyond xNVMe's
-dependencies. The workflow copies the two checkouts
-to `XNVME_FS_TREE`, builds xNVMe and installs it into the tree's prefix, builds xnvme fs
-from this checkout into the same prefix, and builds against that prefix the DuckDB extension with its
-tests, the benchmark and RocksDB with the plugin. It records the commits of
-both checkouts in `artifacts/build.txt`. A tree built from the same commits is
-kept, and nothing is built again.
+`adapters/scripts/ci-deps.sh` installs the packages that the adapters need
+in addition to the dependencies of xNVMe. The workflow then does the
+following:
+
+1. It copies the two checkouts to `XNVME_FS_TREE`.
+2. It builds xNVMe and installs it into the prefix of the tree.
+3. It builds xnvme fs from this checkout and installs it into the same
+   prefix.
+4. It builds, against that prefix, the DuckDB extension with its tests, the
+   benchmark, and RocksDB with the plugin.
+
+The workflow records the commits of both checkouts in `artifacts/build.txt`.
+When `XNVME_FS_TREE` already holds a tree built from the same commits, the
+workflow keeps that tree and builds nothing.
 
 ## 2. Check correctness
 
@@ -46,15 +59,27 @@ kept, and nothing is built again.
       ghcr.io/xnvme/xnvme-devenv/host:v0.15.0 \
       cijoe workflows/xnvme-fs-guest.yaml -c configs/qemu-guest.toml -o cijoe-output-guest --skip-report
 
-This boots xnvme-devenv's Ubuntu 26.10 guest with an IOMMU and two emulated NVMe controllers,
-binds them to vfio-pci inside it, starts `xnvme homi serve` on them and runs
-each suite as a step on a pool of both, served by `xnvme fs serve`: DuckDB's
-sqllogictests with TPC-H SF1, DuckDB's storage tests, the extension's writes
-behind, the benchmark with every sector verified, RocksDB's file system and
-basic database tests and `db_bench`, DuckDB and RocksDB on one pool at once, and
-the trace of what each engine asks of the file system, with its table of I/O
-patterns in `cijoe-output-guest/artifacts/io-patterns.md`. Four of them run
-again through each kernel backend. A failed suite does not stop the ones after
-it. The file system's own suites are
-`cijoe/tests/test_fs.py`, which this workflow does not run; `cijoe/README.md`
-says how they run.
+The workflow boots the Ubuntu 26.10 guest of xnvme-devenv with an IOMMU and
+two emulated NVMe controllers. Inside the guest it binds the controllers to
+vfio-pci and starts `xnvme homi serve` on them. It then runs each test suite
+as a step of its own, on a pool of both controllers that `xnvme fs serve`
+serves. The suites are:
+
+* DuckDB's sqllogictests, with TPC-H at scale factor 1
+* DuckDB's storage tests
+* the write-behind test of the extension
+* the benchmark, which verifies every sector
+* RocksDB's file system tests and basic database tests, and `db_bench`
+* DuckDB and RocksDB on one pool at the same time
+* the trace of the operations that each engine requests from the file
+  system, with a table of the I/O patterns in
+  `cijoe-output-guest/artifacts/io-patterns.md`
+
+The workflow then binds the controllers to the kernel's `nvme` driver and
+runs four of the suites again with each of the kernel backends `io_uring`,
+`io_uring_direct` and `io_uring_cmd`: the write-behind test, the benchmark,
+the RocksDB suite, and the two engines on one pool. A suite that fails does
+not stop the suites after it.
+
+The workflow does not run the test suites of the file system itself, which
+are `cijoe/tests/test_fs.py`. `cijoe/README.md` describes how to run them.
