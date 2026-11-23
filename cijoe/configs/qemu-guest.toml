@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# A QEMU guest with two emulated NVMe controllers, for running xnvme fs through uPCIe and HOMI on a machine without
+# a drive to spare, and in CI. The guest has an IOMMU, so its controllers can be bound to vfio-pci inside it.
+#
+# The images are written under XNVME_FS_GUEST_ROOT, which must be local storage (/mnt on a GitHub runner), not a
+# network file system. The guest is xNVMe's Ubuntu 26.04 nosi image. Its kernel has IOMMUFD and the device cdevs of
+# vfio, so uPCIe uses iommufd. The root account of the image is locked, so the workflows log in as the user 'odus'
+# and use sudo.
+
+[cijoe.transport.guest]
+username = "odus"
+password = "odus.321"
+hostname = "localhost"
+port = 4210
+
+[qemu]
+img_bin = "qemu-img"
+default_guest = "xnvme_fs"
+default_systemimage = "ubuntu-2604-x86_64"
+
+[qemu.systems.x86_64]
+bin = "qemu-system-x86_64"
+
+[qemu.guests.xnvme_fs]
+path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/xnvme_fs"
+system_label = "x86_64"
+system_args.kwa = {cpu = "host", smp = 4, m = "8G", accel = "kvm"}
+system_args.raw = """\
+-M "type=q35,kernel_irqchip=split" \
+-device "intel-iommu,pt=on,intremap=on,caching-mode=on" \
+"""
+system_args.tcp_forward = {host = 4210, guest = 22}
+
+[system-imaging.images.ubuntu-2604-x86_64]
+system_label = "x86_64"
+oras.url = "oras://ghcr.io/safl/nosi/ubuntu-2604-headless@sha256:904b425a0335e7a792d02e0bed543973d96bc01c08a16c9a4531da61cf098082"
+disk.path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/system_imaging/ubuntu-2604-x86_64.qcow2"
+
+[xnvme_fs]
+# The tree that workflows/xnvme-fs-build.yaml built on this host. xnvme_fs_guest_prepare copies the prefix of xNVMe
+# and xnvme fs, and the adapters' binaries and test data, into the guest at the paths they have on this host.
+tree = "{{ local.env.XNVME_FS_TREE }}"
+
+[xnvme_fs.guest]
+controllers = 2                  # emulated NVMe controllers, one namespace each, each on a PCIe root port of its own
+# The size of the sparse raw backing image of each namespace. DuckDB's storage tests fill most of two drives of 8G.
+controller_size = "{{ local.env.get('XNVME_FS_GUEST_DRIVE', '8G') }}"
+hugepages = 256                  # 2 MiB hugepages reserved in the guest, for HOMI's DMA heap
+homi_id = 1
+homi_heap = 402653184            # bytes of HOMI's DMA heap; docs/getting-started.md says what a queue takes of it
+members = ["0000:01:00.0", "0000:02:00.0"]   # the pool's members, bound to vfio-pci and served by HOMI

@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+build/
+duckdb_unittest_tempdir/
+.cache/

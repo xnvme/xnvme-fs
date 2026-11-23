@@ -1,0 +1,24 @@
+# SPDX-FileCopyrightText: Samsung Electronics Co., Ltd
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Configuration for one xnvme fs pool, read by xnvme-fs@.service. Install it as /etc/xnvme/fs-POOL.conf, so that
+# fs-scan.conf configures xnvme-fs@scan.
+
+# The pool's members, space separated: controllers held by the HOMI server below, by PCI address; partition K of
+# one as BDF/pK; or an md RAID 0 set of several as BDF+BDF.
+XNVME_FS_MEMBER=0000:03:00.0 0000:04:00.0
+
+# The HOMI server holding the members, as xnvme-homi@N.service serves it.
+XNVME_FS_HOMI_ID=1
+
+# For members the kernel's nvme driver holds, leave XNVME_FS_HOMI_ID out and name a kernel backend instead:
+# io_uring or io_uring_direct, with each member a namespace's block device, or io_uring_cmd, with each member a
+# namespace's character device. The clients of the pool set the same XNVME_FS_BACKEND.
+#
+#   XNVME_FS_MEMBER=/dev/nvme0n1 /dev/nvme1n1
+#   XNVME_FS_BACKEND=io_uring_direct
+
+# Anything else for 'xnvme fs serve', such as --trace or --view DIR.
+XNVME_FS_OPTS=

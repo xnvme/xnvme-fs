@@ -1,0 +1,35 @@
+{
+  "description": "DuckDB's tests with each test's database and temporary files on the xnvme fs pool 'ci'.",
+  "on_init": "ATTACH 'xnvme-fs://ci/{BASE_TEST_NAME}.db' AS __test__xnvme_fs; SET temp_directory = 'xnvme-fs://ci/tmp';",
+  "on_new_connection": "USE __test__xnvme_fs;",
+  "on_load": "skip",
+  "skip_compiled": "true",
+  "statically_loaded_extensions": [
+    "core_functions",
+    "xnvme_fs",
+    "tpch"
+  ],
+  "inherit_skip_tests": "duckdb/test/configs/force_storage.json",
+  "skip_tests": [
+    {
+      "reason": "Needs an in-memory database; an ATTACH in on_init does not trip require noforcestorage.",
+      "paths": [
+        "test/sql/storage/temp_directory/max_swap_space_error.test",
+        "test/sql/storage/temp_directory/test_runner_temp_directory.test",
+        "test/sql/storage/evict_unpinned_without_temp_directory.test"
+      ]
+    },
+    {
+      "reason": "Runs out of memory in DuckDB v2.0.0 itself at exactly 4 threads, in memory and without xnvme fs, as the guest has.",
+      "paths": [
+        "test/sql/storage/test_eviction_queue_dead_nodes_underflow.test"
+      ]
+    },
+    {
+      "reason": "Counts the attached databases, which on_init adds to.",
+      "paths": [
+        "test/sql/storage/read_duckdb/read_duckdb_basic.test"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: Samsung Electronics Co., Ltd
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+option('tests', type: 'boolean', value: true, description: 'Build and install the test programs, which the xnvme front-end runs as \'xnvme test fs-<name>\'')
+option('hardening', type: 'boolean', value: false, description: 'Attempt enabling hardening, such as bind-now')
+option('dmabuf', type: 'feature', value: 'auto', description: 'Register dma-bufs for direct transfers; needs xnvme_buf_register_dmabuf() of the xNVMe built against')
+option('systemd', type: 'feature', value: 'auto', description: 'Install the unit xnvme-fs@.service; asks systemd for the directory unless systemd_unitdir names it')
+option('systemd_unitdir', type: 'string', value: '', description: 'Where to install systemd units; empty asks systemd via pkg-config')

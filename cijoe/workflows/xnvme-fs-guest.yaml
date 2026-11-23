@@ -1,0 +1,176 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+# SPDX-License-Identifier: BSD-3-Clause
+---
+doc: |
+  Run the adapters' test suites in a QEMU guest with two emulated NVMe controllers, first through uPCIe and HOMI,
+  then through the kernel's backends.
+
+  The workflow boots xNVMe's Ubuntu 26.04 nosi image with an IOMMU and the two controllers, records the system, and binds
+  the controllers to vfio-pci inside the guest. From the tree that workflows/xnvme-fs-build.yaml built on this host,
+  it copies the prefix of xNVMe and xnvme fs and the adapters' binaries and test data into the guest. It starts
+  'xnvme homi serve' on the controllers and runs each suite as one step, on a pool with the two controllers as
+  members and with 'xnvme fs serve', DuckDB and RocksDB as HOMI clients. It then stops HOMI.
+
+  Next the workflow binds the controllers to the kernel's nvme driver and runs the suites behind, bench, rocksdb and
+  two-engines again with each kernel backend: io_uring, which goes through the page cache, io_uring_direct, which
+  does not, and io_uring_cmd, which passes NVMe commands through.
+
+  A failed suite does not stop the suites after it. The workflow does not run the suites of the file system itself,
+  cijoe/tests/test_fs.py. The machine needs KVM, QEMU, oras and a built tree:
+
+    XNVME_FS_GUEST_ROOT=/mnt/xnvme-fs/guest XNVME_FS_TREE=/path/to/the/tree \
+      cijoe workflows/xnvme-fs-guest.yaml -c configs/qemu-guest.toml -o cijoe-output --skip-report
+
+steps:
+- name: guest_kill
+  uses: qemu.guest_kill
+  with:
+    guest_name: "{{ config.qemu.default_guest }}"
+
+- name: guest_image
+  uses: system_imaging.diskimage_from_oras
+  with:
+    pattern: "{{ config.qemu.default_systemimage }}"
+
+- name: guest_initialize
+  uses: qemu.guest_initialize
+  with:
+    guest_name: "{{ config.qemu.default_guest }}"
+    system_image_name: "{{ config.qemu.default_systemimage }}"
+
+- name: guest_start
+  uses: xnvme_fs_guest_start
+
+- name: sysinfo
+  uses: linux.sysinfo
+
+- name: prepare
+  uses: xnvme_fs_guest_prepare
+
+- name: homi_start
+  uses: xnvme_fs_homi
+
+- name: test_sqllogic
+  uses: xnvme_fs_test
+  with:
+    suite: sqllogic
+
+- name: test_duckdb_suite
+  uses: xnvme_fs_test
+  with:
+    suite: duckdb-suite
+
+- name: test_behind
+  uses: xnvme_fs_test
+  with:
+    suite: behind
+
+- name: test_bench
+  uses: xnvme_fs_test
+  with:
+    suite: bench
+
+- name: test_rocksdb
+  uses: xnvme_fs_test
+  with:
+    suite: rocksdb
+
+- name: test_two_engines
+  uses: xnvme_fs_test
+  with:
+    suite: two-engines
+
+- name: test_trace
+  uses: xnvme_fs_test
+  with:
+    suite: trace
+
+- name: trace_patterns
+  uses: xnvme_fs_trace_patterns
+
+- name: homi_stop
+  uses: xnvme_fs_homi
+  with:
+    action: stop
+
+- name: bind_kernel
+  uses: xnvme_fs_guest_bind
+  with:
+    driver: nvme
+
+- name: test_behind_io_uring
+  uses: xnvme_fs_test
+  with:
+    suite: behind
+    backend: io_uring
+
+- name: test_bench_io_uring
+  uses: xnvme_fs_test
+  with:
+    suite: bench
+    backend: io_uring
+
+- name: test_rocksdb_io_uring
+  uses: xnvme_fs_test
+  with:
+    suite: rocksdb
+    backend: io_uring
+
+- name: test_two_engines_io_uring
+  uses: xnvme_fs_test
+  with:
+    suite: two-engines
+    backend: io_uring
+
+- name: test_behind_io_uring_direct
+  uses: xnvme_fs_test
+  with:
+    suite: behind
+    backend: io_uring_direct
+
+- name: test_bench_io_uring_direct
+  uses: xnvme_fs_test
+  with:
+    suite: bench
+    backend: io_uring_direct
+
+- name: test_rocksdb_io_uring_direct
+  uses: xnvme_fs_test
+  with:
+    suite: rocksdb
+    backend: io_uring_direct
+
+- name: test_two_engines_io_uring_direct
+  uses: xnvme_fs_test
+  with:
+    suite: two-engines
+    backend: io_uring_direct
+
+- name: test_behind_io_uring_cmd
+  uses: xnvme_fs_test
+  with:
+    suite: behind
+    backend: io_uring_cmd
+
+- name: test_bench_io_uring_cmd
+  uses: xnvme_fs_test
+  with:
+    suite: bench
+    backend: io_uring_cmd
+
+- name: test_rocksdb_io_uring_cmd
+  uses: xnvme_fs_test
+  with:
+    suite: rocksdb
+    backend: io_uring_cmd
+
+- name: test_two_engines_io_uring_cmd
+  uses: xnvme_fs_test
+  with:
+    suite: two-engines
+    backend: io_uring_cmd
+
+- name: guest_stop
+  uses: qemu.guest_kill
+  with:
+    guest_name: "{{ config.qemu.default_guest }}"

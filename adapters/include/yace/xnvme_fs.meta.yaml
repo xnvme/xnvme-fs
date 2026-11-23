@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# What yace cannot read from include/libxnvme_fs.h, for adapters/scripts/generate-cpp.sh
+name: libxnvme_fs
+prefix: xnvme_fs
+brief: Files on a pool served by xnvme fs
+license: BSD-3-Clause
+pkg: xnvme-fs
+errmsg: xnvme_fs_errmsg

@@ -1,0 +1,101 @@
+# name: test/sql/storage.test_slow
+# description: a database, its write-ahead log and its spill files on the pool
+# group: [sql]
+
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+require xnvme_fs
+
+require-env XNVME_FS_SOCKET_DIR
+
+statement ok
+PRAGMA disable_checkpoint_on_shutdown;
+
+statement ok
+ATTACH 'xnvme-fs://ci/storage.db' AS s;
+
+statement ok
+CREATE TABLE s.t AS SELECT range AS i, range::VARCHAR AS v FROM range(1000000);
+
+statement ok
+CHECKPOINT s;
+
+# Extents are spread over the members, so a table this size leaves data on every one of them.
+query I
+SELECT bool_and(free_extents < extents) FROM xnvme_fs_pool_info('ci');
+----
+true
+
+# These rows are only in the write-ahead log when the database is detached.
+statement ok
+INSERT INTO s.t SELECT range + 1000000, 'wal' FROM range(1000);
+
+statement ok
+DETACH s;
+
+statement ok
+ATTACH 'xnvme-fs://ci/storage.db' AS s;
+
+query III
+SELECT count(*), sum(i), count(*) FILTER (WHERE v = 'wal') FROM s.t;
+----
+1001000	500999999500	1000
+
+statement ok
+CHECKPOINT s;
+
+statement ok
+UPDATE s.t SET v = 'updated' WHERE i % 10 = 0;
+
+statement ok
+DELETE FROM s.t WHERE i % 10 = 1;
+
+statement ok
+DETACH s;
+
+statement ok
+ATTACH 'xnvme-fs://ci/storage.db' AS s;
+
+query III
+SELECT count(*), count(*) FILTER (WHERE v = 'updated'), count(*) FILTER (WHERE i % 10 = 1) FROM s.t;
+----
+900900	100100	0
+
+statement ok
+CHECKPOINT s;
+
+# A file's extents beyond its end are given back when the database shrinks.
+statement ok
+DROP TABLE s.t;
+
+statement ok
+CHECKPOINT s;
+
+statement ok
+DETACH s;
+
+# Spills: the aggregation cannot finish in this memory limit without a temporary directory, and does with the
+# pool's. DuckDB fixes its temporary directory once used, so the run without one goes first.
+statement ok
+SET memory_limit = '64MB';
+
+statement ok
+SET threads = 2;
+
+statement ok
+SET temp_directory = '';
+
+statement error
+SELECT count(*), sum(n) FROM (SELECT v, count(*) AS n FROM (SELECT md5(range::VARCHAR) AS v FROM range(5000000)) GROUP BY v);
+----
+Out of Memory
+
+statement ok
+SET temp_directory = 'xnvme-fs://ci/tmp';
+
+query II
+SELECT count(*), sum(n) FROM (SELECT v, count(*) AS n FROM (SELECT md5(range::VARCHAR) AS v FROM range(5000000)) GROUP BY v);
+----
+5000000	5000000

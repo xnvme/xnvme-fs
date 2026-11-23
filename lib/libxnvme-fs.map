@@ -1,0 +1,37 @@
+{
+	global:
+
+		# libxnvme_fs.h
+		xnvme_fs_errmsg;
+		xnvme_fs_connect;
+		xnvme_fs_disconnect;
+		xnvme_fs_open;
+		xnvme_fs_close;
+		xnvme_fs_size;
+		xnvme_fs_pread;
+		xnvme_fs_pwrite;
+		xnvme_fs_fsync;
+		xnvme_fs_ftruncate;
+		xnvme_fs_stat;
+		xnvme_fs_list;
+		xnvme_fs_mkdir;
+		xnvme_fs_rmdir;
+		xnvme_fs_remove;
+		xnvme_fs_rename;
+		xnvme_fs_info;
+		xnvme_fs_members;
+		xnvme_fs_req_new;
+		xnvme_fs_req_free;
+		xnvme_fs_submit;
+		xnvme_fs_block_size;
+		xnvme_fs_dma_alloc;
+		xnvme_fs_dma_free;
+		xnvme_fs_register_dmabuf;
+		xnvme_fs_unregister_dmabuf;
+		xnvme_fs_submit_direct;
+		xnvme_fs_poll;
+		xnvme_fs_wait;
+
+	local:
+		*;
+};

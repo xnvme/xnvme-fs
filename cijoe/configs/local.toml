@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# Configuration for building xNVMe, xnvme fs and the adapters on this machine. Run workflows/xnvme-fs-build.yaml
+# with this file, then workflows/xnvme-fs-guest.yaml with qemu-guest.toml and the same XNVME_FS_TREE.
+
+[xnvme_fs]
+# xnvme_fs_build builds in this directory, which gets the install prefix of xNVMe and xnvme fs and the adapters'
+# tree. It must be local storage with room for a DuckDB build and a RocksDB build.
+tree = "{{ local.env.XNVME_FS_TREE }}"
+
+[xnvme_fs.source]
+# The xNVMe checkout to build. It must be on the branch api-pass of safl/xnvme, which has the commit that lets
+# other projects extend the commands of xnvme. xnvme fs and the adapters are built from the checkout that holds
+# this file.
+xnvme = "{{ local.env.get('XNVME_FS_XNVME', local.env.HOME + '/git/xnvme') }}"
+
+[xnvme_fs.build]
+# The make targets of the adapters. workflows/xnvme-fs-guest.yaml needs DuckDB with its tests, 'release', and the
+# Debug build of RocksDB with its tests, 'rocksdb'.
+targets = "{{ local.env.get('XNVME_FS_TARGETS', 'release rocksdb') }}"
+# The directory of ccache, kept between builds. The builds use no ccache when this is empty.
+ccache = "{{ local.env.get('XNVME_FS_CCACHE', '') }}"
+# The guest runs the binaries this machine builds. xNVMe links ISA-L when its build finds it, and the guest image
+# has no ISA-L.
+xnvme_options = "-Dwith-isal=disabled"
+
+[xnvme_fs.local]
+# What running the guest needs on this machine, beside oras
+packages = ["qemu-system-x86", "qemu-utils"]

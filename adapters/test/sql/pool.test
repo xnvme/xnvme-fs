@@ -1,0 +1,51 @@
+# name: test/sql/pool.test
+# description: the pool is reached through its server and reports its members and extents
+# group: [sql]
+
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+require xnvme_fs
+
+require-env XNVME_FS_SOCKET_DIR
+
+query IIIII
+SELECT pool, member_index, layout_version, extent_size, extents > 0 AND free_extents <= extents
+FROM xnvme_fs_pool_info('ci') WHERE member_index = 0;
+----
+ci	0	2	1048576	true
+
+query I
+SELECT current_setting('xnvme_fs_socket_dir') = '${XNVME_FS_SOCKET_DIR}';
+----
+true
+
+# A pool nobody serves.
+statement error
+SELECT * FROM xnvme_fs_pool_info('other');
+----
+cannot reach the pool's server for pool 'other'
+
+# The setting is followed when it changes, even with the pool's connection already made.
+statement ok
+SET xnvme_fs_socket_dir = '/nonexistent';
+
+statement error
+SELECT * FROM xnvme_fs_pool_info('ci');
+----
+cannot reach the pool's server
+
+statement ok
+RESET xnvme_fs_socket_dir;
+
+query I
+SELECT count(*) > 0 FROM xnvme_fs_pool_info('ci');
+----
+true
+
+# Names the pool cannot hold.
+statement error
+ATTACH 'xnvme-fs://ci/a/../b.db' AS bad;
+----
+is not a file name the pool holds

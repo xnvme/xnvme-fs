@@ -1,0 +1,79 @@
+<!--
+SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+
+SPDX-License-Identifier: CC-BY-4.0
+-->
+
+# xnvme fs
+
+xnvme fs is a user-space file system on NVMe drives, built on xNVMe. This
+repository holds the file system, which is a library, a command-line program
+and a systemd unit. It also holds a DuckDB extension and a RocksDB plugin
+that store the files of those engines on xnvme fs, the documentation, and the
+cijoe workflows that build and test all of them.
+
+The drives of a file system form a pool. A pool is a set of members, and the
+bytes of each file are stored in extents that are striped over the members.
+`xnvme fs serve` serves the metadata of one pool on a Unix socket. The file
+data does not pass through that server. Each client process reads and writes
+the extents of its files on its own NVMe queues, either through xNVMe's uPCIe
+backend as a client of a HOMI server, or through the Linux kernel's NVMe
+driver with io_uring.
+
+xnvme fs depends on xNVMe and extends the `xnvme` command line. The build
+installs the program `xnvme-fs` into the directory that `xnvme` runs its
+commands from, so `xnvme fs` runs `xnvme-fs`. The build also installs
+`fs.extension` into xNVMe's extension directory, so the overview that `xnvme`
+prints lists `xnvme fs`.
+
+| Path | Content |
+|---|---|
+| `include/`, `lib/` | The library libxnvme-fs and its C interface `libxnvme_fs.h`. |
+| `tools/` | The program `xnvme-fs` with the commands `mkfs`, `serve`, `info` and `cp`, and the helpers `mkfs.xnvme-fs` and `mount.xnvme-fs`. |
+| `tests/` | The test programs, which run as `xnvme test fs-<name>`. |
+| `systemd/` | The unit `xnvme-fs@.service`, one instance per pool, and an example configuration. |
+| `docs/fs.rst` | The manual of `xnvme fs`. |
+| `adapters/` | The DuckDB extension, the RocksDB plugin, the C++ header that both use, and their tests. `adapters/README.md` describes how to build and run them. |
+| `cijoe/` | The cijoe workflows that build xnvme fs and run the adapters' test suites, and `tests/test_fs.py`, the test suites of the file system that need NVMe controllers. |
+
+## Building and installing
+
+xnvme fs is a meson project in C and C++17, for Linux. The build finds xNVMe
+by pkg-config and takes uFuse v0.4 as a meson wrap.
+
+xnvme fs needs the branch `api-pass` of github.com/safl/xnvme. No release of
+xNVMe has the content of that branch yet. The branch has the commit
+"feat(cli): let other projects extend the commands of xnvme". It also has the
+spec headers and command preps that libxnvme-fs uses to build NVMe commands
+and to read their completions. libxnvme-fs does not compile against an xNVMe
+without them.
+
+With xNVMe installed in `$PREFIX`:
+
+    export PKG_CONFIG_PATH=$(dirname $(find $PREFIX -name xnvme.pc))
+    meson setup builddir --prefix $PREFIX
+    meson compile -C builddir
+    meson test -C builddir
+    meson install -C builddir
+    xnvme fs --help
+
+`meson install` installs `xnvme-fs` and the test programs into the directory
+that `pkg-config --variable=libexecdir xnvme` prints, whatever `--prefix` is.
+It installs libxnvme-fs, `libxnvme_fs.h`, `xnvme-fs.pc`, the helpers and the
+systemd unit under `--prefix`. The option `-Dtests=false` disables the test
+programs. The option `-Dsystemd_unitdir=DIR` sets the directory of the unit
+for a system where systemd's pkg-config file is not installed.
+
+`meson test` runs the tests that need no NVMe controller. They check the
+symbols that libxnvme-fs exports, the systemd unit, the command line under
+`xnvme`, and the C++ layer that the adapters use.
+`adapters/scripts/generate-cpp.sh` generates that layer from `libxnvme_fs.h`
+with yace. `cijoe/README.md` describes how to run the test suites that need
+controllers.
+
+## Licenses
+
+The file system and its cijoe workflows are licensed BSD-3-Clause, the
+adapters MIT, and the documentation CC-BY-4.0. `REUSE.toml` and the header of
+each file state the license of the file. The license texts are in
+`LICENSES/`.

@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+# SPDX-License-Identifier: BSD-3-Clause
+---
+doc: |
+  Trace the operations that DuckDB and RocksDB request of xnvme fs, in the QEMU guest of
+  workflows/xnvme-fs-guest.yaml.
+
+  The workflow runs the trace suite alone, and builds the table of I/O patterns from the traces. The operations an
+  engine requests do not depend on the device, so the trace needs no drive, only the guest's emulated controllers.
+  Build first with workflows/xnvme-fs-build.yaml, then run:
+
+    XNVME_FS_GUEST_ROOT=... XNVME_FS_TREE=... \
+      cijoe workflows/xnvme-fs-trace.yaml -c configs/qemu-guest.toml -o cijoe-output --skip-report
+    cijoe -o cijoe-output --archive
+
+  The second command runs no step. It moves the output of the run to cijoe-archive/ beside cijoe-output.
+
+steps:
+- name: guest_kill
+  uses: qemu.guest_kill
+  with:
+    guest_name: "{{ config.qemu.default_guest }}"
+
+- name: guest_image
+  uses: system_imaging.diskimage_from_oras
+  with:
+    pattern: "{{ config.qemu.default_systemimage }}"
+
+- name: guest_initialize
+  uses: qemu.guest_initialize
+  with:
+    guest_name: "{{ config.qemu.default_guest }}"
+    system_image_name: "{{ config.qemu.default_systemimage }}"
+
+- name: guest_start
+  uses: xnvme_fs_guest_start
+
+- name: sysinfo
+  uses: linux.sysinfo
+
+- name: prepare
+  uses: xnvme_fs_guest_prepare
+
+- name: homi_start
+  uses: xnvme_fs_homi
+
+- name: trace
+  uses: xnvme_fs_test
+  with:
+    suite: trace
+
+- name: patterns
+  uses: xnvme_fs_trace_patterns
+
+- name: homi_stop
+  uses: xnvme_fs_homi
+  with:
+    action: stop
+
+- name: guest_stop
+  uses: qemu.guest_kill
+  with:
+    guest_name: "{{ config.qemu.default_guest }}"

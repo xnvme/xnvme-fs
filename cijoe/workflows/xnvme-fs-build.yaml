@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+# SPDX-License-Identifier: BSD-3-Clause
+---
+doc: |
+  Build xNVMe, xnvme fs and the adapters on this machine, for workflows/xnvme-fs-guest.yaml to test.
+
+  The step xnvme_fs_local_deps checks the machine for oras, /dev/kvm and the packages that the build needs; with
+  install: yes in its with:, it installs the missing packages with apt. The step xnvme_fs_build builds in
+  XNVME_FS_TREE. It builds xNVMe from the checkout that XNVME_FS_XNVME names, by default ~/git/xnvme, which must be
+  on the branch api-pass of safl/xnvme, and installs it into a prefix in the tree. It builds xnvme fs from this
+  checkout and installs it into the same prefix. Against that prefix it builds DuckDB with the extension and its
+  tests, and RocksDB with the plugin.
+
+  workflows/xnvme-fs-guest.yaml then runs the tests in a QEMU guest, so that they do not touch the drives of this
+  machine:
+
+    XNVME_FS_TREE=$HOME/.cache/xnvme-fs-tree cijoe workflows/xnvme-fs-build.yaml -c configs/local.toml \
+      -o cijoe-output-build --skip-report
+    XNVME_FS_GUEST_ROOT=$HOME/.cache/xnvme-fs-guest XNVME_FS_TREE=$HOME/.cache/xnvme-fs-tree \
+      cijoe workflows/xnvme-fs-guest.yaml -c configs/qemu-guest.toml -o cijoe-output-guest --skip-report
+
+steps:
+- name: deps
+  uses: xnvme_fs_local_deps
+
+- name: build
+  uses: xnvme_fs_build

@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+myst-parser>=3.0
+sphinx>=8.0
+sphinx-book-theme>=1.1

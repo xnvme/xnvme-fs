@@ -1,0 +1,37 @@
+# name: test/sql/xnvme_fs.test
+# description: the extension loads and registers its settings and its file system
+# group: [sql]
+
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+statement error
+SELECT current_setting('xnvme_fs_backend');
+----
+Catalog Error
+
+require xnvme_fs
+
+query I
+SELECT current_setting('xnvme_fs_backend') = 'upcie';
+----
+true
+
+statement error
+SET xnvme_fs_backend = 'nvme';
+----
+backend 'nvme' is not available
+
+statement ok
+SET xnvme_fs_socket_dir = '/nonexistent';
+
+statement error
+ATTACH 'xnvme-fs://pool0/x.db' AS x;
+----
+cannot reach the pool's server for pool 'pool0' at '/nonexistent/pool0.sock'
+
+statement error
+ATTACH 'xnvme-fs:///x.db' AS x;
+----
+names no pool

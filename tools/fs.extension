@@ -1,0 +1,5 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: BSD-3-Clause
+section=serve
+description=Serve a pool of NVMe drives as a file system to DuckDB and RocksDB

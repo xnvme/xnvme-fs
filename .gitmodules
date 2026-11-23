@@ -1,0 +1,11 @@
+[submodule "adapters/duckdb"]
+	path = adapters/duckdb
+	url = https://github.com/duckdb/duckdb
+	branch = v2.0.0
+[submodule "adapters/extension-ci-tools"]
+	path = adapters/extension-ci-tools
+	url = https://github.com/duckdb/extension-ci-tools
+	branch = v2.0-cyanoptera
+[submodule "adapters/third_party/rocksdb"]
+	path = adapters/third_party/rocksdb
+	url = https://github.com/facebook/rocksdb

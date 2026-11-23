@@ -1,0 +1,53 @@
+# name: test/sql/tpch_sf1.test_slow
+# description: TPC-H at scale factor 1 on the pool, checked against DuckDB's reference answers, spilling to it
+# group: [sql]
+
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+
+require xnvme_fs
+
+require tpch
+
+require-env XNVME_FS_SOCKET_DIR
+
+statement ok
+ATTACH 'xnvme-fs://ci/tpch_sf1.db' AS tpch;
+
+statement ok
+USE tpch;
+
+statement ok
+CALL dbgen(sf=1);
+
+statement ok
+CHECKPOINT;
+
+# The memory a query needs grows with its threads; four keeps the limit meaningful on any host.
+statement ok
+SET threads = 4;
+
+statement ok
+SET memory_limit = '500MB';
+
+statement ok
+SET temp_directory = 'xnvme-fs://ci/tpch_tmp';
+
+loop i 1 10
+
+query I
+PRAGMA tpch(${i})
+----
+<FILE>:duckdb/extension/tpch/dbgen/answers/sf1/q0${i}.csv
+
+endloop
+
+loop i 10 23
+
+query I
+PRAGMA tpch(${i})
+----
+<FILE>:duckdb/extension/tpch/dbgen/answers/sf1/q${i}.csv
+
+endloop

@@ -1,0 +1,604 @@
+# SPDX-FileCopyrightText: Samsung Electronics Co., Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+"""
+The pytest configuration of cijoe/tests/test_fs.py, from xNVMe's cijoe/tests/conftest.py
+
+Taken from xNVMe at 088759e61 (feat(fs): name, list and remove files, and report
+errors, from C), with what test_fs.py does not use left out.
+
+xnvme_be_opts(): helper-function used by xnvme_setup()
+
+xnvme_setup(): generates a list of sensible backend configurations and matches them
+up with devices from the CIJOE configuration. Emitting (device, be_opts, cli_args)
+and pytest.skip when a valid device is not found in the configuration.
+
+XnvmeDriver: provides a "functor" for controlling NVMe driver attachment.
+
+device: a fixture for parametrize, invoking XnvmeDriver as needed by the
+specific testcase, e.g. specific to the parametrization. This relies on the pytest
+feature "indirect parametrization".
+
+HomiServer: starts and stops the homi server holding the controllers under test.
+"""
+
+from functools import wraps
+from time import sleep
+
+import pytest
+
+from .xnvme_be_combinations import get_backend_configurations
+
+_homi_id = 0
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--homi-id",
+        type=int,
+        default=0,
+        help="Open devices against the given homi id (0 = single process)",
+    )
+
+
+def pytest_configure(config):
+    global _homi_id
+    try:
+        _homi_id = config.getoption("--homi-id", default=0)
+    except ValueError:
+        _homi_id = 0
+
+
+def get_osname():
+    """Return normalized OS name from CIJOE config"""
+    osname = pytest.cijoe_instance.getconf("os.name", "linux")
+    if osname in ("debian", "ubuntu"):
+        osname = "linux"
+    return osname
+
+
+def get_homi_id():
+    return _homi_id if _homi_id else None
+
+
+def xnvme_be_opts(options=None, only_labels=[]):
+    """Produce a list of "sensible" backend configurations"""
+
+    osname = get_osname()
+
+    if options is None:
+        options = ["be", "mem", "sync", "async", "admin", "label"]
+    if "label" not in options:
+        options.append("label")
+
+    combinations = get_backend_configurations()
+
+    all_configs = []
+    for opts in combinations[osname]:
+        # Skip combinations whose declared labels don't intersect only_labels.
+        if only_labels and not any(lbl in only_labels for lbl in opts["label"]):
+            continue
+        for be in opts["be"]:
+            for be_mem in opts["mem"]:
+                for be_admin in opts["admin"]:
+                    for be_sync in opts["sync"]:
+                        for be_async in opts["async"]:
+                            all_configs.append(
+                                {
+                                    "be": be,
+                                    "mem": be_mem,
+                                    "admin": be_admin,
+                                    "sync": be_sync,
+                                    "async": be_async,
+                                    "label": opts["label"],
+                                    "homi": opts.get("homi", False),
+                                }
+                            )
+
+    filtered = []
+    seen = []
+    for cfg in all_configs:
+        key = [(k, v) for k, v in cfg.items() if k in options]
+        if key not in seen:
+            seen.append(key)
+            filtered.append(cfg)
+    filtered.sort(key=lambda d: [(k, v) for k, v in d.items() if k in options])
+
+    return filtered
+
+
+def cijoe_config_get_all_devices(labels):
+    """Returns the 'device-dict' from every device in 'cijoe_cfg' with the given 'label'"""
+    devices = []
+    for device in pytest.cijoe_instance.getconf("devices", []):
+        if not (set(labels) - set(device["labels"])):
+            devices.append(device)
+
+    return devices
+
+
+def cijoe_config_get_device(labels):
+    """Returns the 'device-dict' from 'devices' in 'cijoe_cfg' with the given 'label'"""
+
+    for device in pytest.cijoe_instance.getconf("devices", []):
+        if not (set(labels) - set(device["labels"])):
+            return device
+
+    return None
+
+
+def xnvme_cli_args(device, be_opts):
+    """Construct cli-arguments for the given device and backend options"""
+
+    args = []
+
+    if device:
+        args += [f"{device['uri']}"]
+        args += [f"--dev-nsid {device['nsid']}"]
+
+    if be_opts:
+        args += [f"--{arg} {val}" for arg, val in be_opts.items() if arg != "label"]
+
+    if _homi_id > 0:
+        # One spelling for every backend: --homi-id fills both the field uPCIe
+        # reads and the segment id SPDK hands DPDK.
+        args += [f"--homi-id {_homi_id}"]
+
+    return " ".join(args)
+
+
+def xnvme_setup(labels=[], opts=[]):
+    """Produces a config, yields (device, be_opts, cli_args)"""
+
+    parametrization = []
+
+    # The GPU backends drive PCIe controllers like the others; their label
+    # says where the data buffers live. Leaving them out here made every
+    # combination declaring one unreachable, so the tests written for them
+    # could only ever skip.
+    combinations = xnvme_be_opts(
+        opts,
+        (
+            ["file"]
+            if "file" in labels
+            else ["bdev", "cdev", "pcie", "fabrics", "rdma", "cuda", "hip", "dmabuf"]
+        ),
+    )
+
+    for be_opts in combinations:
+        search = labels + be_opts["label"]
+        device = cijoe_config_get_device(search)
+
+        dstr = device["uri"] if device else "None"
+        bstr = ",".join([f"{k}={v}" for k, v in be_opts.items() if k != "homi"])
+
+        paramid = f"uri={dstr},{bstr}"
+
+        cli_opts = {k: v for k, v in be_opts.items() if k in opts}
+        cli_args = xnvme_cli_args(device, cli_opts)
+
+        if device is None:
+            parametrization.append(
+                pytest.param(
+                    device,
+                    be_opts,
+                    cli_args,
+                    marks=pytest.mark.skip(
+                        f"Configuration has no device labelled: {search}"
+                    ),
+                    id=paramid,
+                )
+            )
+        else:
+            parametrization.append(
+                pytest.param(
+                    device,
+                    be_opts,
+                    cli_args,
+                    id=paramid,
+                )
+            )
+
+    return parametrization
+
+
+class XnvmeDriver(object):
+    """
+    The driver managing for an NVMe device is in Linux attached to one of:
+
+    * nvme (Kernel managed NVMe driver)
+    * vfio-pci (User space)
+    * uio-generic (User space)
+
+    Switching attachment is done with 'xnvme driver --be <backend>', a userspace
+    backend such as upcie or spdk, or posix for the kernel.
+
+    This class encapsulates the cli-tool via static helpers (kernel_detach,
+    kernal_attach). Whether or not a device needs one or the other is handled
+    explicitly by the key: "driver_attachment" on the device in the configuration.
+
+        driver_attachment: "kernel"
+
+    or
+
+        driver_attachment: "userspace"
+
+    or, to leave the attachment as it is, e.g. for a device exported by the NVMe
+    target of the fabrics tests:
+
+        driver_attachment: "none"
+
+    When no "driver_attachment" key is provided, "kernel" is assumed.
+
+    Additionally, since switching device-driver-attachment takes a non-trivial amount of
+    time. Especially when doing it repeatedly, as done when executing the testrunner.
+
+    To reduce that processing time, then the XnvmeDriver.prep() function checks whether
+    it needs to call the cli-tool tool, by examining XnvmeDriver.ATTACHED.
+    """
+
+    IS_KERNEL_ATTACHED = None
+
+    @staticmethod
+    def kernel_detach(cijoe):
+        """Detach from kernel"""
+
+        # Rebinding devices and re-allocating hugepages invalidates a running server,
+        # so tear it down first rather than leaving HomiServer with a stale handle.
+        HomiServer.stop(cijoe)
+
+        # --force as the filesystem cases leave signatures on the devices; 'xnvme driver'
+        # reserves no DMA memory
+        if get_osname() == "freebsd":
+            # Buffers smaller than the default avoid ENOMEM on the fragmented CI heap;
+            # 'hugepages setup' reloads contigmem, so only when it is not loaded
+            err, _ = cijoe.run(
+                "xnvme driver --be spdk --all --force && "
+                "{ kldstat -q -m contigmem || "
+                "hugepages setup --size 65536 --count 32 || "
+                "{ kenv hw.contigmem.num_buffers=32 && "
+                "kenv hw.contigmem.buffer_size=67108864 && kldload contigmem; }; }"
+            )
+        else:
+            err, _ = cijoe.run(
+                "xnvme driver --be upcie --all --force && "
+                "{ [ $(cat /proc/sys/vm/nr_hugepages) -ge 1024 ] || "
+                "hugepages setup --count 1024 || "
+                "echo 1024 > /proc/sys/vm/nr_hugepages; }"
+            )
+        if err:
+            cijoe.run("xnvme list; dmesg | tail -n20")
+
+        XnvmeDriver.IS_KERNEL_ATTACHED = False
+
+    @staticmethod
+    def kernel_attach(cijoe):
+        """Attach to kernel"""
+
+        HomiServer.stop(cijoe)
+
+        err, _ = cijoe.run("xnvme driver --be posix --all")
+        if err:
+            cijoe.run("xnvme list; dmesg | tail -n20")
+
+        XnvmeDriver.IS_KERNEL_ATTACHED = True
+
+    @staticmethod
+    def attach(cijoe, device):
+        """Attach device driver according to the 'needs' of the given 'device'"""
+
+        attachment = device.get("driver_attachment", "kernel")
+        needs_kernel = attachment == "kernel"
+        needs_userspace = attachment == "userspace"
+
+        if needs_userspace and XnvmeDriver.IS_KERNEL_ATTACHED in [True, None]:
+            XnvmeDriver.kernel_detach(cijoe)
+            cijoe.run("xnvme enum")
+        elif needs_kernel and XnvmeDriver.IS_KERNEL_ATTACHED in [False, None]:
+            XnvmeDriver.kernel_attach(cijoe)
+            cijoe.run("xnvme enum")
+        else:
+            cijoe.run('echo "Skipping XnvmeDriver.attach()."')
+
+
+@pytest.fixture
+def device(cijoe, request):
+    """
+    This handles NVMe-device-driver-attachment per parametrized testcase.
+
+    Usage example:
+
+      from cijoe.xnvme.tests.config import xnvme_device_driver as device
+
+      pytest.mark.parametrize("device,be_opts", {data}, indirect=["device"])
+      test_foo(cijoe, device, be_opts):
+        ...
+
+    By doing so, then each generated parameter for the test-case is sent by this
+    fixture. This allows the fixture to invoke device-driver attachment according to
+    the given device. This avoids having to call:
+
+      XnvmeDriver.attach(cijoe, request.param)
+
+    from within the testcase body itself.
+    """
+    if request.param:
+        if _homi_id:
+            callspec = getattr(request.node, "callspec", None)
+            be_opts = callspec.params.get("be_opts") if callspec else None
+            if be_opts:
+                if be_opts.get("homi"):
+                    HomiServer.start(
+                        cijoe,
+                        HomiServer.serve_be(be_opts["be"]),
+                        be_opts.get("label"),
+                    )
+                else:
+                    pytest.skip(f"{be_opts.get('be')} cannot share a controller")
+        XnvmeDriver.attach(cijoe, request.param)
+
+    return request.param
+
+
+def xnvme_parametrize(labels, opts):
+    """
+    This decorator provides all the pytest-parametrization magic in one.
+
+    Instead of decorating tests with, e.g.:
+
+        @pytest.mark.parametrize(
+            "device,be_opts,cli_args",
+            xnvme_setup(labels=["bdev"], opts=["be", "admin"]),
+            indirect=["device"],
+        )
+
+    Then they can be decorated with, e.g.:
+
+        @xnvme_parametrize(labels=["bdev"]), opts=["be", "admin"])
+
+    This encapsulates all the pytest-voodoo into the conftest
+    """
+
+    def decorator(fun):
+        @pytest.mark.parametrize(
+            "device,be_opts,cli_args",
+            xnvme_setup(labels=labels, opts=opts),
+            indirect=["device"],
+        )
+        @wraps(fun)
+        def inner(*args, **kwargs):
+            return fun(*args, **kwargs)
+
+        return inner
+
+    return decorator
+
+
+class HomiServer:
+    """
+    Manages the lifecycle of a homi server daemon.
+
+    A single server holds every device carrying the labels of the backend-configuration
+    under test, so it can serve whichever device a testcase asks for, as well as
+    testcases enumerating and opening all of them. Labels vary per backend; the GPU
+    backends use 'cuda'/'hip' where the host backend uses 'pcie'.
+
+    Tracks the backend and labels the running server was started with (similar to
+    XnvmeDriver.IS_KERNEL_ATTACHED), so it is only restarted when those change.
+    """
+
+    RUNNING = None
+    CIJOE = None
+    TIMEOUT = 60
+
+    # The GPU backends are client spellings of uPCIe, and homi refuses them;
+    # a server holds controllers and serves them, where a client's buffers
+    # live is the client's business. Every other client needs a server of its
+    # own backend: an SPDK client is a DPDK secondary and finds nothing to
+    # attach to behind a uPCIe server.
+    SERVE_BE = {"upcie-cuda": "upcie", "upcie-hip": "upcie"}
+
+    @staticmethod
+    def serve_be(be):
+        """The backend a server has to run to serve a client of 'be'"""
+
+        return HomiServer.SERVE_BE.get(be, be)
+
+    # Emitted by homi once it serves, or holds, every device it was given
+    READY_MARKER = "HOMI started successfully"
+
+    # homi's own default host heap per device: the 64 MiB pool its clients draw from
+    # plus the 16 MiB it takes itself. Passed explicitly, so --host-heap-size is
+    # exercised without changing what the server gets.
+    HOST_HEAP_SIZE_PER_DEV = (64 + 16) * 1024 * 1024
+
+    @staticmethod
+    def is_running(cijoe):
+        """Returns True when a homi server is running"""
+
+        # Not by name: until the front-end execs xnvme-homi the process is setsid,
+        # stdbuf or xnvme, and run directly it is 'xnvme-homi serve'. The brackets
+        # keep the pattern from matching the shell that cijoe.run() wraps this in.
+        err, _ = cijoe.run("pgrep -f '[x]nvme[- ]homi serve'")
+
+        return not err
+
+    @staticmethod
+    def logfile(be, labels):
+        """
+        Where a server's output goes, named for what makes it that server
+
+        The readiness marker is what says a server has opened its devices, so
+        the file it lands in has to name the server that wrote it. Keyed on the
+        backend alone, a marker left by the previous one reads as this one
+        being ready before it has opened anything.
+        """
+
+        return f"/tmp/homi_{be}_{'-'.join(labels)}.out"
+
+    @staticmethod
+    def is_ready(cijoe, be, labels):
+        """Returns True when the homi server has opened all of its devices"""
+
+        err, _ = cijoe.run(
+            f"grep -q '{HomiServer.READY_MARKER}'" f" {HomiServer.logfile(be, labels)}"
+        )
+
+        return not err
+
+    @staticmethod
+    def start(cijoe, be, labels=None):
+        labels = labels if labels else ["pcie"]
+
+        if HomiServer.RUNNING == (be, tuple(labels)):
+            return
+
+        ctrlrs = list(
+            dict.fromkeys(d["uri"] for d in cijoe_config_get_all_devices(labels))
+        )
+        uris = " ".join(ctrlrs)
+        if not uris:
+            pytest.skip(f"Configuration has no device labelled: {labels}")
+
+        XnvmeDriver.kernel_detach(cijoe)
+
+        # A server nobody here started is holding the devices, which a run
+        # before this one left behind. Every testcase wanting a server would
+        # otherwise skip on the probe below, because the device it wants is
+        # taken, and a suite reporting skips exits zero: a broken environment
+        # would read as a run where nothing applied.
+        if HomiServer.RUNNING is None and HomiServer.is_running(cijoe):
+            cijoe.run("pgrep -a homi")
+            pytest.fail(
+                "a homi server is already running that this run did not start;"
+                " it holds the devices, so nothing here can serve them. A run"
+                " killed before its teardown leaves one behind: 'pkill -9 -x"
+                " xnvme-homi' clears it"
+            )
+
+        # A backend that cannot open the device at all on this machine is not a
+        # defect in what is under test, and a server that fails for that reason
+        # tells us nothing. Ask first, so that the environment produces a skip
+        # while a server that cannot start over devices that do open produces a
+        # failure.
+        err, _ = cijoe.run(f"xnvme info {ctrlrs[0]} --be {be}")
+        if err:
+            pytest.skip(f"be({be}) cannot open {ctrlrs[0]} on this machine")
+
+        # SPDK backs its DMA memory with files in the hugetlbfs mount and never unlinks
+        # them, since clients must be able to map them. As xNVMe does not call
+        # spdk_env_fini(), they outlive the process and keep holding hugepages. Drop them
+        # so the server starting here does so with a full pool.
+        mount_point = cijoe.getconf("hugetlbfs.mount_point", "/mnt/huge")
+        cijoe.run(f"rm -f {mount_point}/spdk*map_*")
+
+        # 'stdbuf -oL' keeps the readiness marker from sitting in libc's fully-buffered
+        # stdout while the server parks waiting for a signal.
+        #
+        # 'setsid' and the closed stdin are what let this run against a remote
+        # target: nohup alone leaves the server holding the transport's
+        # channel, so the command never returns and the server is reported as
+        # not running. Harmless where the target is localhost.
+        logfile = HomiServer.logfile(be, labels)
+
+        # Truncated rather than appended to: a marker from an earlier server
+        # under the same name would otherwise answer for this one.
+        cijoe.run(f"rm -f {logfile}")
+        cijoe.run(
+            f"setsid stdbuf -oL xnvme homi serve {uris} --be {be} --homi-id {_homi_id} "
+            f"--host-heap-size {HomiServer.HOST_HEAP_SIZE_PER_DEV * len(ctrlrs)} "
+            f"< /dev/null > {logfile} 2>&1 &"
+        )
+
+        # Opening a device takes about a second, so waiting a fixed duration either
+        # wastes time or lets testcases attach while the server is still opening the
+        # rest, where they fail with the server unresponsive on the DPDK mp channel.
+        #
+        # The server comes up through setsid, stdbuf and the front-end before it
+        # execs xnvme-homi, so one look right after the launch can miss it; it is
+        # gone only when it is missing on several looks in a row. A server that
+        # failed is killed, as one left running would hold the devices of every
+        # testcase after this one.
+        missing = 0
+        for _ in range(HomiServer.TIMEOUT):
+            if HomiServer.is_ready(cijoe, be, labels):
+                break
+            missing = 0 if HomiServer.is_running(cijoe) else missing + 1
+            if missing >= 3:
+                cijoe.run(f"cat {logfile}")
+                cijoe.run("pkill -x xnvme-homi || true")
+                pytest.fail(f"homi server for be({be}) is not running")
+            sleep(1)
+        else:
+            cijoe.run(f"cat {logfile}")
+            cijoe.run("pkill -x xnvme-homi || true")
+            pytest.fail(f"homi server for be({be}) did not become ready")
+
+        HomiServer.RUNNING = (be, tuple(labels))
+        HomiServer.CIJOE = cijoe
+
+    @staticmethod
+    def forget():
+        """
+        Drop the record of a server that is already gone
+
+        For a testcase that ended the server itself, where stop() has nothing
+        left to ask for or wait on. The next testcase to want one starts it.
+        """
+
+        HomiServer.RUNNING = None
+        HomiServer.CIJOE = None
+
+    @staticmethod
+    def stop(cijoe):
+        if HomiServer.RUNNING is None:
+            return
+
+        HomiServer.RUNNING = None
+        HomiServer.CIJOE = None
+
+        cijoe.run("pkill -x xnvme-homi || true")
+
+        # Closing a controller is not instant, and a server still holding the device
+        # keeps its successor from claiming it, so wait for it to actually be gone
+        for _ in range(HomiServer.TIMEOUT):
+            if not HomiServer.is_running(cijoe):
+                break
+            sleep(1)
+        else:
+            pytest.fail("homi server did not terminate")
+
+
+@pytest.fixture(scope="session", autouse=True)
+def homi_teardown():
+    yield
+    if HomiServer.CIJOE is not None:
+        HomiServer.stop(HomiServer.CIJOE)
+
+
+# Sort order for pytest_collection_modifyitems. `be` first because backend
+# switches are the expensive operation; the rest tie-break within a backend.
+_BE_KEYS = ("be", "admin", "sync", "async", "mem")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Group all variants for one backend together in the run timeline.
+
+    Sort items by backend config first and test name second so the timeline
+    runs as test_foo[kernel] -> test_bar[kernel] -> ... -> test_foo[spdk]
+    -> test_bar[spdk] -> ..., minimising the number of driver-swap
+    boundaries in the run and clustering failures by backend. Tests without
+    parametrization sort before the parametrized batches with their
+    relative order preserved.
+    """
+
+    def key(item):
+        callspec = getattr(item, "callspec", None)
+        if callspec is None:
+            return ("",) * len(_BE_KEYS) + (item.name,)
+        be_opts = callspec.params.get("be_opts")
+        if not isinstance(be_opts, dict):
+            return ("",) * len(_BE_KEYS) + (item.name,)
+        return tuple(str(be_opts.get(k, "")) for k in _BE_KEYS) + (item.name,)
+
+    items.sort(key=key)

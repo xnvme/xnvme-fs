@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: MIT
+#
+# Run from the repository root: pre-commit run --all-files
+#
+# adapters/include/yace/ is generated: reformatted, it would differ from what adapters/scripts/generate-cpp.sh writes.
+# LICENSES/ holds the licence texts as REUSE downloads them
+exclude: ^(adapters/(duckdb|extension-ci-tools|third_party|include/yace)|LICENSES)/
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+  - repo: https://github.com/fsfe/reuse-tool
+    rev: v5.0.2
+    hooks:
+      - id: reuse
+  # The file system at the top of the repository is formatted as xNVMe's code is, by xNVMe's configuration, which is
+  # not in this repository; adapters/.clang-format is the adapters'
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v11.0.1
+    hooks:
+      - id: clang-format
+        types_or: [c++]
+        files: ^adapters/

@@ -1,0 +1,68 @@
+# SPDX-FileCopyrightText: Samsung Electronics Co., Ltd
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# The devices that tests/test_fs.py runs on and overwrites. The entries are copied from xNVMe's
+# cijoe/configs/debian-trixie-iommu_enabled.toml: the NVM controllers without protection information of the QEMU
+# guest which that file describes. Each controller has two entries, its block device with the kernel's driver and
+# its PCI address with a userspace driver. The tests use the first device labelled "pcie" for a pool on one
+# controller, and the devices labelled "fs" where a test needs several controllers or partitions one. Run the tests
+# as root on the machine that has the controllers, with xnvme and its extension xnvme-fs on PATH:
+#
+#   pytest --config configs/test-fs.toml --output /tmp/fs-homi --homi-id 42 -k pcie tests/test_fs.py
+#   pytest --config configs/test-fs.toml --output /tmp/fs-kernel -k test_stripe_kernel tests/test_fs.py
+#
+# For another machine, replace the entries with its controllers. test_queues needs a controller labelled
+# "few_queues", which has two I/O queues. This file has no such entry.
+
+[os]
+name = "debian"
+version = "trixie"
+
+[[devices]]
+uri = "/dev/nvme0n1"
+nsid = 1
+labels = [ "dev", "bdev", "nvm", "scc", "write_zeroes", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "kernel"
+
+[[devices]]
+uri = "0000:01:00.0"
+nsid = 1
+labels = [ "dev", "pcie", "nvm", "scc", "write_zeroes", "ctrlr", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "userspace"
+
+[[devices]]
+uri = "/dev/nvme3n1"
+nsid = 1
+labels = [ "dev", "bdev", "nvm", "scc", "write_zeroes", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "kernel"
+
+[[devices]]
+uri = "0000:04:00.0"
+nsid = 1
+labels = [ "dev", "pcie", "nvm", "scc", "write_zeroes", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "userspace"
+
+[[devices]]
+uri = "/dev/nvme4n1"
+nsid = 1
+labels = [ "dev", "bdev", "nvm", "scc", "large_mdts", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "kernel"
+
+[[devices]]
+uri = "0000:05:00.0"
+nsid = 1
+labels = [ "dev", "pcie", "nvm", "scc", "large_mdts", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "userspace"
+
+[[devices]]
+uri = "/dev/nvme5n1"
+nsid = 1
+labels = [ "dev", "bdev", "nvm", "scc", "fdp", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "kernel"
+
+[[devices]]
+uri = "0000:06:00.0"
+nsid = 1
+labels = [ "dev", "pcie", "nvm", "scc", "fdp", "log_health_ns", "idfy_cs", "fs" ]
+driver_attachment = "userspace"

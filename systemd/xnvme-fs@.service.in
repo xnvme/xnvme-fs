@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Samsung Electronics Co., Ltd
+# SPDX-FileCopyrightText: Simon A. F. Lund <os@safl.dk>
+#
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# xnvme fs serving one pool, one instance per pool name.
+#
+#   systemctl enable --now xnvme-fs@scan
+#
+# reads @sysconfdir@/xnvme/fs-scan.conf and serves the pool scan at /run/xnvme-fs/scan.sock, where 'xnvme fs cp'
+# finds it unless XNVME_FS_SOCKET_DIR names another directory. The pool is made with 'xnvme fs mkfs' first. Its
+# members are held by a HOMI server, such as xnvme-homi@N.service, or, with XNVME_FS_BACKEND a kernel backend, by
+# the kernel's nvme driver. A unit cannot name another unit from its configuration, so the ordering after the HOMI
+# server is a drop-in.
+
+[Unit]
+Description=xNVMe file system, pool %i
+StartLimitIntervalSec=180
+StartLimitBurst=3
+After=local-fs.target
+
+[Service]
+Type=exec
+EnvironmentFile=@sysconfdir@/xnvme/fs-%i.conf
+# Every instance's socket lives here, so stopping one must not remove the directory under the others
+RuntimeDirectory=xnvme-fs
+RuntimeDirectoryPreserve=yes
+# 'xnvme fs serve' takes one --member for each member, and XNVME_FS_MEMBER lists them space separated. A kernel
+# backend has no HOMI id, so --homi-id is passed only where XNVME_FS_HOMI_ID is set; XNVME_FS_BACKEND reaches the
+# server through its environment
+ExecStart=/bin/sh -c 'm=; for x in $$XNVME_FS_MEMBER; do m="$$m --member $$x"; done; exec @libexecdir@/xnvme-fs serve --pool %i $$m $${XNVME_FS_HOMI_ID:+--homi-id "$$XNVME_FS_HOMI_ID"} --socket /run/xnvme-fs/%i.sock $$XNVME_FS_OPTS'
+# Started means a client can connect, not that the process exists
+ExecStartPost=/bin/sh -c 'for i in $$(seq 1 100); do [ -S /run/xnvme-fs/%i.sock ] && exit 0; sleep 0.1; done; echo "xnvme-fs did not open /run/xnvme-fs/%i.sock"; exit 1'
+Restart=on-failure
+RestartSec=5s
+# 'xnvme fs serve' commits the pool's metadata and closes its members on SIGTERM
+KillSignal=SIGTERM
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target
