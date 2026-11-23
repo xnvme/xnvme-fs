@@ -24,9 +24,8 @@ defaults:
     shell: bash
 
 jobs:
-  # A pull request that changes only files under docs/ and adapters/docs/ and Markdown files at the top level needs
-  # no build and no guest. verify-nvme-pcie-emulated reads docs_prose_only, and runs for a release pull request
-  # whatever it changes.
+  # A pull request that changes only files under docs/ and Markdown files at the top level needs no build and no
+  # guest. verify-nvme-pcie-emulated reads docs_prose_only, and runs for a release pull request whatever it changes.
   changes-to-docs:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
@@ -49,7 +48,7 @@ jobs:
             git diff --name-only --no-renames "$PR_BASE...HEAD" > changed.txt || : > changed.txt
           fi
           cat changed.txt
-          if [ -s changed.txt ] && ! grep -qvE '^(docs/|adapters/docs/|[^/]+\.md$)' changed.txt; then
+          if [ -s changed.txt ] && ! grep -qvE '^(docs/|[^/]+\.md$)' changed.txt; then
             docs_prose_only=true
           fi
           echo "docs_prose_only=$docs_prose_only" | tee -a "$GITHUB_OUTPUT"
@@ -127,9 +126,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build the documentation
-        run: make -C adapters/docs html
+        run: make -C docs html
       - name: Archive the documentation
-        run: tar -czf docs-html.tar.gz -C adapters/docs/_build html
+        run: tar -czf docs-html.tar.gz -C docs/_build html
       - uses: actions/upload-artifact@v4
         with:
           name: docgen-html

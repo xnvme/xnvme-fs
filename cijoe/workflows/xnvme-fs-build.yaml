@@ -11,7 +11,7 @@ doc: |
 
   The machine needs xNVMe's dependencies and the packages that adapters/scripts/ci-deps.sh installs. xNVMe's image
   for Ubuntu 26.04 has both once ci-deps.sh has run in it. workflows/xnvme-fs-guest.yaml then runs the tests in the
-  guest of xnvme-devenv. adapters/docs/reproducing.md has the commands of both workflows.
+  guest of xnvme-devenv. docs/reproducing.md has the commands of both workflows.
 
 steps:
 - name: build

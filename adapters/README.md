@@ -45,8 +45,8 @@ that prefix:
     duckdb -c "LOAD xnvme_fs; ATTACH 'xnvme-fs://pool0/tpch.db' AS t;"
     db_bench --fs_uri=xnvme-fs://pool0 --db=/bench
 
-`docs/engines.md` and `docs/configuration.md` describe the settings and the
-environment variables, and `docs/design.md` describes the design.
+`../docs/engines.md` and `../docs/configuration.md` describe the settings and
+the environment variables, and `../docs/design.md` describes the design.
 
 ## Testing
 

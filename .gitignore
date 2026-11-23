@@ -1,6 +1,6 @@
 build/
 builddir/
-adapters/docs/_build/
-adapters/docs/.venv/
+docs/_build/
+docs/.venv/
 subprojects/*
 !subprojects/ufuse.wrap

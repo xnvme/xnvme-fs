@@ -18,5 +18,5 @@ html_title = "xnvme fs"
 html_theme_options = {
     "repository_url": "https://github.com/xnvme/xnvme-fs",
     "use_repository_button": True,
-    "path_to_docs": "adapters/docs",
+    "path_to_docs": "docs",
 }

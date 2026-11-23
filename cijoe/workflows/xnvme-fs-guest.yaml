@@ -17,7 +17,7 @@ doc: |
 
   A failed suite does not stop the suites after it. The workflow does not run the suites of the file system itself,
   cijoe/tests/test_fs.py. Run the workflow in the host container of xnvme-devenv, on a machine with KVM and a built
-  tree; adapters/docs/reproducing.md has the command.
+  tree; docs/reproducing.md has the command.
 
 steps:
 - name: guest_kill
