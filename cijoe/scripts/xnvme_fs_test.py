@@ -5,7 +5,8 @@ xnvme_fs_test: one of the adapters' test suites, on the pool's controllers throu
 =======================================================================================
 
 Runs a suite in the tree xnvme_fs_build built, with 'xnvme fs serve' and every engine process a HOMI client of the
-server started by xnvme_fs_homi, on a pool of the members named by xnvme_fs.guest.members:
+server started by xnvme_fs_homi, on a pool of the members named by xnvme_fs.guest.members, or for two-pools on two
+pools of one member each:
 
   sqllogic      the DuckDB extension's sqllogictests beside a running 'xnvme fs serve', TPC-H SF1 among them
   duckdb-suite  DuckDB's own storage tests with each test's database and temporary files on the pool
@@ -13,6 +14,7 @@ server started by xnvme_fs_homi, on a pool of the members named by xnvme_fs.gues
   bench         xnvme-fs-bench, every workload synchronous and asynchronous, briefly, with every sector checked
   rocksdb       RocksDB through the plugin: its file system and basic database tests, and db_bench
   two-engines   DuckDB and RocksDB on one pool at once, each database checked after
+  two-pools     one DuckDB process with a database on each of two pools, a pool to each member
   trace         what each engine asks of the library, by operation and size, from XNVME_FS_TRACE
 
 With --backend io_uring, io_uring_direct or io_uring_cmd, the members are reached through the kernel's nvme driver
@@ -40,6 +42,7 @@ SUITES = {
     "bench": "test/with-xnvme-fs.sh test/bench.sh",
     "rocksdb": "test/with-xnvme-fs.sh test/rocksdb.sh",
     "two-engines": "test/with-xnvme-fs.sh test/two-engines.sh",
+    "two-pools": "test/two-pools.sh",
     "trace": "TRACE_DIR=/var/tmp/xnvme-fs-trace test/with-xnvme-fs.sh test/trace.sh",
 }
 

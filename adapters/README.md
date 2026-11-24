@@ -60,6 +60,7 @@ controllers.
     make test_xnvme_fs_duckdb_suite                 # DuckDB's storage tests on a pool
     test/with-xnvme-fs.sh test/rocksdb.sh
     test/with-xnvme-fs.sh test/two-engines.sh
+    test/two-pools.sh                               # a pool on each of the first two controllers, one DuckDB
     test/with-xnvme-fs.sh test/bench.sh
 
 ## License
