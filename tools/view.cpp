@@ -4,7 +4,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 
 // The read-only FUSE view of a pool: the namespace as the pool's server holds it, and file contents read through
-// the server's own queues, beside the engines' I/O on the same controllers. Spoken over /dev/fuse with ufuse.
+// the server's own queues, beside the engines' I/O on the same controllers. The server reads the kernel's requests
+// from /dev/fuse and answers them with ufuse.
 
 #include "server.hpp"
 
@@ -21,7 +22,8 @@ struct Server::ViewState {
 	ufuse_session session;
 	std::string mountpoint;
 	std::vector<uint8_t> buf;
-	// Inodes are handed out by path on first sight and kept; a name removed and made again gets its old one.
+	// Ino assigns a path its inode number on first use and never removes it, so a name that is removed and made again
+	// gets the same number.
 	std::map<std::string, uint64_t> ino_of;
 	std::vector<std::string> path_of;
 
@@ -83,13 +85,14 @@ int Server::ViewFd() const {
 	return view ? view->session.fd : -1;
 }
 
-// The view's answers, one per request it serves; ufuse_dispatch decodes the rest away: mutating requests and
-// opens for writing get EROFS, and requests without an answer here ENOSYS
+// The handlers of the requests the view answers. ufuse_dispatch answers the others: a request that changes the file
+// system and an open for writing with EROFS, a request with no handler here with ENOSYS
 struct Server::ViewOps {
 	static Server &Of(const ufuse_req *req) {
 		return *static_cast<Server *>(req->ctx);
 	}
-	//! The path of inode 'ino', copied, since handing out an inode may grow the table it lives in; false if unknown
+	//! Copies the path of inode 'ino' to 'path'; false if the inode is unknown. A copy, since Ino may reallocate
+	//! 'path_of', which holds the path
 	static bool PathOf(Server &srv, uint64_t ino, std::string &path) {
 		auto known = srv.view->Path(ino);
 		if (known) {
@@ -97,7 +100,7 @@ struct Server::ViewOps {
 		}
 		return known != nullptr;
 	}
-	// A file's size is what the server last heard from its client: committed, truncated or closed
+	// A file's size is the size the server last received from the file's client, in a commit, a truncate or a close
 	static bool Attr(Server &srv, const std::string &p, uint64_t node, struct fuse_attr *a) {
 		auto f = srv.files.find(p);
 		if (f != srv.files.end()) {
@@ -111,8 +114,8 @@ struct Server::ViewOps {
 		return false;
 	}
 
-	//! Seconds the kernel may keep attributes: long for a file, whose size changes the server notifies; short for a
-	//! directory, whose entries come and go with only the entry timeout to show it
+	//! The seconds the kernel may cache attributes: 60 for a file, since ViewChanged notifies the kernel when a file's
+	//! size changes; 1 for a directory, since nothing notifies the kernel when a directory's entries change
 	static uint64_t AttrValid(const struct fuse_attr &a) {
 		return S_ISREG(a.mode) ? 60 : 1;
 	}
@@ -157,7 +160,7 @@ struct Server::ViewOps {
 		}
 		struct fuse_open_out out;
 		memset(&out, 0, sizeof(out));
-		// The engines change files under the view, so the kernel keeps none of their pages
+		// Clients write the files without the kernel seeing it, so the kernel must cache none of their pages
 		out.open_flags = dir ? 0 : FOPEN_DIRECT_IO;
 		ufuse_req_reply(req, &out, sizeof(out));
 	}
@@ -278,7 +281,8 @@ void Server::ViewChanged(const std::string &name) {
 	if (it == view->ino_of.end()) {
 		return;
 	}
-	// Attributes only: that takes no lock a request the view has yet to answer can hold, so this loop may send it
+	// Invalidates attributes only. That takes no kernel lock that a request the view has yet to answer can hold, so
+	// the thread that answers the view's requests may send it
 	int err = ufuse_notify_inval_inode(&view->session, it->second, -1, 0);
 	if (err) {
 		fprintf(stderr, "xnvme-fs: the view could not drop '%s''s attributes: %s\n", name.c_str(), strerror(-err));

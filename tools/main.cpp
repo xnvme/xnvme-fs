@@ -3,8 +3,8 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 //
-// xnvme-fs: formats a pool, and serves its metadata to the engines' adapters on a Unix socket; 'xnvme fs' runs it. Called as
-// mkfs.xnvme-fs or mount.xnvme-fs, it takes the command lines mkfs(8) and mount(8) pass their helpers.
+// xnvme-fs: formats a pool, and serves its metadata to the engines' adapters on a Unix socket; 'xnvme fs' runs it.
+// Called as mkfs.xnvme-fs or mount.xnvme-fs, it takes the command lines mkfs(8) and mount(8) pass their helpers.
 
 #include "server.hpp"
 
@@ -46,7 +46,7 @@ struct Args {
 	bool overwrite = false;
 	bool trace = false;
 	std::string view;
-	//! Stop when the view is unmounted, as a mount's daemon does.
+	//! Serve returns when the view is unmounted. ParseMount sets it, for the daemon that mount.xnvme-fs starts.
 	bool stop_with_view = false;
 };
 
@@ -163,14 +163,14 @@ static Args ParseMount(int argc, char **argv) {
 				} else if (o == "trace") {
 					a.trace = true;
 				}
-				// Others, such as ro, rw and the defaults mount(8) passes, mean nothing to a read-only view
+				// Other options, such as ro, rw and the defaults mount(8) passes, are ignored: the view is read-only
 				if (comma == std::string::npos) {
 					break;
 				}
 				start = comma + 1;
 			}
 		} else if (!opt.empty() && opt[0] == '-') {
-			// -s, -f, -n, -v, and -t with its type, as mount(8) may pass them
+			// Ignored: -s, -f, -n, -v, and -t with its type, which mount(8) may pass
 			if (opt == "-t" && i + 1 < argc) {
 				i++;
 			}
@@ -240,8 +240,9 @@ static Args Parse(int argc, char **argv) {
 	return a;
 }
 
-//! Holds an exclusive lock for every drive of every member, so two daemons never format or serve one controller. A
-//! drive is a PCI address, not a file to lock, so the lock is a file named for it under /run/lock.
+//! Takes an exclusive lock for every drive that a member names, so that two processes never format or serve the same
+//! drive. A drive under uPCIe is a PCI address, which is no file to lock, so each lock is a file under /run/lock
+//! named after the drive.
 static std::vector<int> LockMembers(const std::vector<std::string> &members) {
 	std::vector<std::string> drives;
 	for (auto &m : members) {
@@ -286,7 +287,8 @@ static int Listen(const std::string &path) {
 	if (fd < 0) {
 		Fail(errno, "xnvme fs: cannot create a socket: %s", strerror(errno));
 	}
-	// A socket nobody answers on is left over from a daemon that died; one that answers is served.
+	// A socket that accepts a connection has a server. Any other socket at the path was left by a server that exited
+	// without removing it, and is replaced.
 	if (connect(fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)) == 0) {
 		close(fd);
 		Fail(EADDRINUSE, "xnvme fs: '%s' is already served", path.c_str());
@@ -446,9 +448,9 @@ static bool Mounted(const std::string &dir) {
 	return found;
 }
 
-//! Serves the pool on MEMBER in a daemon of its own, which the view's unmount stops, and returns once the view is
-//! mounted, or fails with what stopped the daemon. The daemon reads the superblock, not this process, so nothing
-//! of xNVMe's or HOMI's crosses the fork.
+//! Forks a daemon that serves the pool of MEMBER and stops when the view is unmounted. Returns once the view is
+//! mounted; where the daemon exits first, prints the daemon's log and throws. The daemon reads the superblock, not
+//! the calling process, so the calling process opens no xNVMe device before the fork.
 static int Mount(Args a) {
 	if (Mounted(a.view)) {
 		Fail(EBUSY, "xnvme fs: '%s' is already mounted", a.view.c_str());
@@ -471,7 +473,7 @@ static int Mount(Args a) {
 			a.pool = sb.pool_name;
 			a.members = sb.members;
 			DefaultSocket(a);
-			// The daemon outlives mount.xnvme-fs, so it logs to a file, whose name the pipe carries first
+			// The daemon outlives mount.xnvme-fs, so it logs to a file, after writing the file's name to the pipe
 			mkdir("/run/xnvme-fs", 0755);
 			auto log = "/run/xnvme-fs/" + a.pool + ".log";
 			fprintf(stderr, "log %s\n", log.c_str());

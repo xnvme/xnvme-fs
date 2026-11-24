@@ -4,7 +4,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 //
 // Copies a local file into a pool served by 'xnvme fs serve', or a pool's file out to a local one,
-// byte for byte. Run beside the server, with XNVME_FS_HOMI_ID set unless XNVME_FS_BACKEND is a
+// byte for byte. Run on the server's host, with XNVME_FS_HOMI_ID set unless XNVME_FS_BACKEND is a
 // kernel one, and with XNVME_FS_SOCKET_DIR set where the server's socket is not in /run/xnvme-fs.
 // A file copied in is synced before the copy returns.
 //
@@ -25,8 +25,8 @@
 // Where 'xnvme fs serve' and xnvme-fs@.service put a pool's socket
 #define SOCKET_DIR "/run/xnvme-fs"
 
-// The first failure of a copy: its errno, and for a call of libxnvme_fs.h the message the call
-// left, which says what the errno does not
+// The first failure of a copy: its errno, and for a call of libxnvme_fs.h the message that
+// xnvme_fs_errmsg() returned after the call
 struct failure {
 	int err;
 	char why[512];

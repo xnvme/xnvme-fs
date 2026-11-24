@@ -22,18 +22,19 @@ After=local-fs.target
 [Service]
 Type=exec
 EnvironmentFile=@sysconfdir@/xnvme/fs-%i.conf
-# Every instance's socket lives here, so stopping one must not remove the directory under the others
+# Every instance has its socket in this directory, so stopping one instance must not remove the directory
 RuntimeDirectory=xnvme-fs
 RuntimeDirectoryPreserve=yes
 # 'xnvme fs serve' takes one --member for each member, and XNVME_FS_MEMBER lists them space separated. A kernel
 # backend has no HOMI id, so --homi-id is passed only where XNVME_FS_HOMI_ID is set; XNVME_FS_BACKEND reaches the
 # server through its environment
 ExecStart=/bin/sh -c 'm=; for x in $$XNVME_FS_MEMBER; do m="$$m --member $$x"; done; exec @libexecdir@/xnvme-fs serve --pool %i $$m $${XNVME_FS_HOMI_ID:+--homi-id "$$XNVME_FS_HOMI_ID"} --socket /run/xnvme-fs/%i.sock $$XNVME_FS_OPTS'
-# Started means a client can connect, not that the process exists
+# The unit counts as started once 'xnvme fs serve' has made its socket, which is when a client can connect
 ExecStartPost=/bin/sh -c 'for i in $$(seq 1 100); do [ -S /run/xnvme-fs/%i.sock ] && exit 0; sleep 0.1; done; echo "xnvme-fs did not open /run/xnvme-fs/%i.sock"; exit 1'
 Restart=on-failure
 RestartSec=5s
-# 'xnvme fs serve' commits the pool's metadata and closes its members on SIGTERM
+# On SIGTERM 'xnvme fs serve' closes its clients' handles, unmounts the view, removes the socket and closes its
+# members. It writes no table, so what a client has not committed is lost
 KillSignal=SIGTERM
 TimeoutStopSec=30s
 

@@ -50,7 +50,7 @@ void TraceOp(const char *op, const std::string &name, uint64_t offset, uint64_t 
 	int n = snprintf(line, sizeof(line), "%.6f %d %ld %s %s %llu %llu\n", at, int(getpid()), long(syscall(SYS_gettid)),
 	                 op, name.empty() ? "/" : name.c_str(), (unsigned long long)offset, (unsigned long long)nbytes);
 	if (n > 0) {
-		// O_APPEND makes the one write land whole after whatever another process appended
+		// With O_APPEND, the one write() appends the whole line after what another process appended
 		ssize_t ignored = write(t.fd, line, size_t(n) < sizeof(line) ? size_t(n) : sizeof(line) - 1);
 		(void)ignored;
 	}

@@ -314,7 +314,7 @@ public:
 	}
 
 	struct ThreadQueue;
-	//! Gives back a queue whose thread is exiting, once the commands it has in flight complete.
+	//! Waits for the commands in flight on the queue of an exiting thread, then frees the queue.
 	void Release(ThreadQueue *queue);
 
 private:
@@ -326,7 +326,7 @@ private:
 
 	std::string path;
 	xnvme_dev *dev = nullptr;
-	//! Reached through the kernel's nvme driver, whose queues signal completions on a descriptor to sleep on.
+	//! Set for the kernel backends, which reach the drive through the kernel's nvme driver.
 	bool kernel = false;
 	//! Through a block device, whose reads and writes complete with the bytes moved rather than an NVMe status.
 	bool counted = false;
@@ -346,10 +346,11 @@ private:
 	std::mutex rmw;
 };
 
-// A thread's queue on a drive: QUEUE_DEPTH commands of at most SLOT_MAX bytes, each with a slot of DMA-able
-// memory, from the HOMI server's heap under uPCIe. As many slots as the queue is deep, so it never fills. The heap is
-// one for every drive the server holds, and every thread of every client has a queue on each drive of its member, so
-// a slot's memory is allocated when a command first needs it rather than with the queue.
+// A thread's queue on a drive: QUEUE_DEPTH commands of at most SLOT_MAX bytes, each with a slot of DMA memory, which
+// under uPCIe comes from the HOMI server's heap. The queue has QUEUE_DEPTH slots, so a command that has a slot has a
+// place in the queue. The HOMI server has one heap for all the drives it holds, and every thread of every client has
+// a queue on each drive of its member, so a slot's memory is allocated when a command first needs it, not when the
+// queue is made.
 static constexpr uint32_t QUEUE_DEPTH = 32;
 static constexpr uint64_t SLOT_MAX = 256ULL << 10;
 //! Slots allocated with the queue: a write covering a block in part holds one while it reads the block into another.
@@ -369,7 +370,7 @@ struct Drive::ThreadQueue {
 	xnvme_queue *queue = nullptr;
 	//! Reads and writes complete with the bytes moved, and the end of the device as a short count, not an error.
 	bool counted = false;
-	//! The member's base, added to every command's offset.
+	//! The drive's base, added to every command's offset.
 	uint64_t base = 0;
 	xnvme_dev *dev = nullptr;
 	//! Each slot's DMA memory, null until a command first needs it.
@@ -418,8 +419,8 @@ static void Completed(struct xnvme_cmd_ctx *ctx, void *arg) {
 	                  (opc == XNVME_SPEC_NVM_READ_OPCODE || opc == XNVME_SPEC_NVM_WRITE_OPCODE) &&
 	                  Moved(ctx) != p->queue->nbytes[p->slot];
 	failed = failed || moved_less;
-	// A command of a request reports to its Completion only; the queue's flag is for Finish, which such a request
-	// never calls, so it would fail some later caller
+	// A command of a request reports its failure to the request's Completion only. Finish reads the queue's flag, and
+	// such a request never calls Finish, so the flag would make a later, unrelated Finish throw
 	if (failed && !p->completion) {
 		p->queue->failed = true;
 	} else if (!failed && p->copy_to) {
@@ -469,8 +470,9 @@ static void Completed(struct xnvme_cmd_ctx *ctx, void *arg) {
 	}
 }
 
-//! Takes a free slot, polling the queue until one is; with 'buffer', a slot with its DMA memory. Once the heap has no
-//! more to give, the queue goes on with the slots it has.
+//! Takes a free slot, polling the queue until one is free; with 'buffer', a slot with its DMA memory. Where the
+//! allocation of a slot's memory fails, the slots without memory are removed from the free slots, and the queue
+//! continues with the slots that have memory.
 static uint32_t TakeSlot(Drive::ThreadQueue &q, bool buffer = true) {
 	for (;;) {
 		while (q.free_slots.empty()) {
@@ -527,13 +529,13 @@ void PacedWait(int cls, bool (*done)(void *arg), void *arg) {
 	auto &mean = mean_ns[cls];
 	if (!Spin() && mean >= SLEEP_FROM_NS) {
 		if (!slack_set) {
-			// The default 50 us of timer slack would outlast the sleep itself
+			// The default timer slack of 50 us can be longer than the sleep itself
 			prctl(PR_SET_TIMERSLACK, 1000UL);
 			slack_set = true;
 		}
 		std::this_thread::sleep_for(std::chrono::nanoseconds(mean / 2));
-		// Done before the thread woke, by an unknown margin: learning the late wake as the wait would keep the thread
-		// sleeping past a drive that has become fast, so the estimate halves instead
+		// The wait ended before the thread woke, an unknown time earlier. Averaging in the sleep as the wait's duration
+		// would keep the sleeps too long after a drive has become faster, so the average is halved instead
 		if (done(arg)) {
 			mean /= 2;
 			return;
@@ -560,8 +562,8 @@ static void Drain(Drive::ThreadQueue &q, int cls) {
 	    q.queue);
 }
 
-//! Runs 'issue', and on an exception waits out the commands it left in flight before passing it on: their
-//! completions write to the caller's frame.
+//! Runs 'issue', and on an exception waits for the commands it left in flight before rethrowing: their completions
+//! write to the caller's frame.
 template <class F>
 static void Issue(Drive::ThreadQueue &q, F issue) {
 	try {
@@ -651,10 +653,11 @@ static void Submit(Drive::ThreadQueue &q, uint32_t slot, uint8_t opc, uint32_t n
 
 static std::atomic<uint64_t> next_drive_id {1};
 
-// Engines start and stop threads, DuckDB with every database it opens, so a queue goes back to its drive when its
-// thread exits rather than when the drive closes; a drive closing first takes its queues with it. The registry
-// tells a thread's exit which of its drives are still open. It is never destroyed: a drive held by a static, such
-// as an engine's registry of sessions, closes during static destruction, which may come after this file's.
+// Engines start and stop threads, DuckDB with every database it opens, so a thread's queue is released to its drive
+// when the thread exits, not when the drive closes; a drive that closes first frees its queues itself. The registry
+// tells an exiting thread which of its drives are still open. The registry is never destroyed: a drive held by a
+// static object, such as an engine's registry of sessions, closes during static destruction, which may run after
+// this file's.
 struct DrivesOpen {
 	std::mutex lock;
 	std::unordered_map<uint64_t, Drive *> map;
@@ -702,7 +705,7 @@ Drive::Drive(const std::string &path_p, const Access &access, Member::Stats &sta
 		opts.homi_id = access.homi_id;
 	} else {
 		// The synchronous interface must match the asynchronous one: NVMe ioctls beside buffered reads and writes
-		// would pass the page cache by
+		// would bypass the page cache
 		kernel = true;
 		snprintf(opts.be, sizeof(opts.be), "%s", "linux");
 		bool cmd = access.backend == "io_uring_cmd";
@@ -721,7 +724,7 @@ Drive::Drive(const std::string &path_p, const Access &access, Member::Stats &sta
 	nsid = xnvme_dev_get_nsid(dev);
 	lba_nbytes = geo->lba_nbytes;
 	size = geo->tbytes;
-	// A command carries at most 65536 blocks (nlb is 16 bits, zero-based), the controller's MDTS and a slot
+	// A command transfers at most 65536 blocks (nlb is 16 bits, zero-based), the controller's MDTS, and a slot's size
 	chunk = std::min<uint64_t>(uint64_t(lba_nbytes) << 16, SLOT_MAX);
 	if (geo->mdts_nbytes && geo->mdts_nbytes < chunk) {
 		chunk = geo->mdts_nbytes;
@@ -731,7 +734,7 @@ Drive::Drive(const std::string &path_p, const Access &access, Member::Stats &sta
 		try {
 			OpenPartition(partition, raid);
 		} catch (...) {
-			// Not registered yet, so the thread's exit would not give the queue back
+			// The drive is not in the registry yet, so the thread's exit would not release the queue
 			thread_queues.map.erase(id);
 			for (auto q : queues) {
 				xnvme_queue_term(q->queue);
@@ -828,7 +831,7 @@ Drive::~Drive() {
 void Drive::Release(ThreadQueue *q) {
 	std::lock_guard<std::mutex> guard(queues_lock);
 	queues.erase(std::find(queues.begin(), queues.end(), q));
-	// A command still in flight would land in a freed slot, and its request would never complete
+	// A command still in flight would complete into a freed slot, and its request would never complete
 	xnvme_queue_drain(q->queue);
 	xnvme_queue_term(q->queue);
 	q->FreeSlots();
@@ -862,7 +865,7 @@ Drive::ThreadQueue &Drive::Queue() {
 			std::lock_guard<std::mutex> guard(queues_lock);
 			held = queues.size();
 		}
-		// A controller out of I/O queues fails the creation with no status saying so
+		// A controller with no I/O queue left fails the creation without a status that says so
 		Fail(-err,
 		     "xnvme fs: cannot create a queue on '%s': %s; this process holds %zu there already, and the controller, "
 		     "or HOMI's limit per client over all its drives, may allow no more: cap the threads using it",
@@ -900,8 +903,9 @@ void Drive::BeginWrite(const void *buf, uint64_t nbytes, uint64_t offset, Comple
 	uint64_t start = offset / lba_nbytes * lba_nbytes;
 	uint64_t end = AlignUp(offset + nbytes, lba_nbytes);
 	bool partial = start != offset || end != offset + nbytes;
-	// A write covering a block in part holds this from reading the block until its write has landed, so two never
-	// merge into the same block; it finishes its commands before returning for that reason.
+	// A write that covers a block only in part holds 'rmw' from reading the block until its own write has completed, so
+	// that two such writes never merge into one block at the same time. For that reason it also waits for its commands
+	// before returning.
 	std::unique_lock<std::mutex> guard(rmw, std::defer_lock);
 	if (partial) {
 		guard.lock();
@@ -914,7 +918,8 @@ void Drive::BeginWrite(const void *buf, uint64_t nbytes, uint64_t offset, Comple
 			uint64_t to = std::min(at + n, offset + nbytes);
 			auto slot = TakeSlot(q);
 			auto bytes = q.Slot(slot);
-			// A block the write covers only in part is read into the slot first, so the rest of it survives
+			// A block the write covers only in part is first read into the slot, so the write keeps the block's other
+			// bytes
 			uint64_t head = at;
 			uint64_t tail = at + n - lba_nbytes;
 			try {
@@ -1047,7 +1052,7 @@ void Drive::Zero(uint64_t offset, uint64_t nbytes) {
 		});
 		Finish();
 	} catch (Error &) {
-		// A controller without Write Zeroes gets the zeros written
+		// The controller may lack Write Zeroes, so the range is written with zeros instead
 		std::vector<uint8_t> zeros(chunk, 0);
 		for (uint64_t at = offset; at < offset + nbytes; at += chunk) {
 			BeginWrite(zeros.data(), std::min(chunk, offset + nbytes - at), at);
@@ -1318,7 +1323,7 @@ void Member::Poke() {
 }
 
 void Member::Finish(int cls) {
-	// Every drive is waited out before a failure is passed on, since commands left in flight write to the caller's
+	// Finish waits for every drive before it rethrows a failure, since commands left in flight write to the caller's
 	// buffers
 	std::exception_ptr failed;
 	for (auto &d : drives) {
@@ -1427,7 +1432,7 @@ std::unique_ptr<Pool> Pool::Format(const std::string &name, const std::vector<st
 		}
 	}
 
-	// Each slot holds every extent of the pool once, plus room for about ten thousand names.
+	// A slot has room for the address of every extent of the pool, 8 bytes each, and 1 MiB for the names and sizes.
 	auto &sb = pool->superblock;
 	uint64_t total_extents = smallest / extent_size * members.size();
 	sb.extent_size = extent_size;

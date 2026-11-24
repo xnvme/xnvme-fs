@@ -7,13 +7,13 @@
  * xnvme fs from C: files on a pool served by `xnvme fs serve`, read and written by the calling
  * process itself, through uPCIe or the kernel's io_uring
  *
- * A session is the process's connection to one pool's server; a file is a name in that pool. Reads
- * and writes are striped over the pool's members, and a request may span several; the synchronous
- * calls wait for it, the asynchronous ones return at once and are polled by the thread that
- * submitted them. Calls return 0, a count, or a negative errno, and xnvme_fs_dma_alloc(), which
- * lends memory, returns it, or NULL with errno set; xnvme_fs_errmsg() says why the last one on the
- * thread failed. A string argument that is NULL fails the call with -EINVAL, unless the call says
- * what NULL means.
+ * A session is the process's connection to one pool's server; a file is a name in that pool. The
+ * server allocates each extent of a file on the member with the most free extents, so a read or a
+ * write may span several members; the synchronous calls wait for it, the asynchronous ones return
+ * at once and are polled by the thread that submitted them. Calls return 0, a count, or a negative
+ * errno; xnvme_fs_dma_alloc() returns memory, or NULL with errno set. xnvme_fs_errmsg() returns
+ * the message of the last call that failed on the thread. A call given NULL for a string argument
+ * fails with -EINVAL, unless the call says what NULL means.
  */
 #ifndef LIBXNVME_FS_H
 #define LIBXNVME_FS_H
@@ -39,7 +39,13 @@ struct xnvme_fs_req;
 #define XNVME_FS_KIND_FILE      1 ///< The name is a file
 #define XNVME_FS_KIND_DIRECTORY 2 ///< The name is a directory
 
-/** A name in the pool: 'kind' is 0 where there is none, and 'size' a file's durable size */
+/**
+ * A name in the pool: 'kind' is 0 where there is no such name. For a file that is open through the
+ * session given to xnvme_fs_stat(), 'size' is the file's size in that session, as xnvme_fs_size()
+ * returns it. For any other file, 'size' is the size the server last received for the file, from
+ * an xnvme_fs_fsync(), an xnvme_fs_ftruncate() or the close of the file's last handle in its
+ * session; only xnvme_fs_fsync() makes that size durable. 'size' is 0 for a directory.
+ */
 struct xnvme_fs_stat {
 	uint64_t size;
 	uint8_t kind;
@@ -57,7 +63,10 @@ struct xnvme_fs_info {
 /** The longest name of a file or directory in the pool, and of a member's path, without the NUL */
 #define XNVME_FS_NAME_MAX 255
 
-/** An entry of a directory: 'size' is a file's size as of its last commit, 0 for a directory */
+/**
+ * An entry of a directory: 'size' is a file's size as 'size' of struct xnvme_fs_stat gives it, 0
+ * for a directory
+ */
 struct xnvme_fs_entry {
 	uint64_t size;
 	uint8_t kind;
@@ -233,8 +242,8 @@ xnvme_fs_stat(struct xnvme_fs_session *s, const char *name, struct xnvme_fs_stat
  *
  * Names added, removed or renamed between two calls shift the offsets. Pass 'version' 0 on the
  * first call: it is set to the version of the pool's names, and a later call given that version
- * fails with -ESTALE once the names have changed, so the caller can start over. The size of a file
- * this process has open is the size it has here, as xnvme_fs_stat() gives.
+ * fails with -ESTALE once the names have changed, so the caller can start over. The size of an
+ * entry is the size that xnvme_fs_stat() gives for the name.
  *
  * @param s The session
  * @param directory The directory, "" for the top
@@ -270,13 +279,13 @@ xnvme_fs_list(struct xnvme_fs_session *s, const char *directory, uint64_t offset
 int
 xnvme_fs_mkdir(struct xnvme_fs_session *s, const char *name);
 /**
- * Removes the directory 'name' and every file and directory under it; -EBUSY where another
- * process has one of the files open
+ * Removes the directory 'name' and every file and directory under it; -EBUSY where one of the
+ * files is open through another session, of this process or of another
  *
  * @param s The session
  * @param name The name of the directory in the pool
  *
- * @return 0 on success, -EBUSY where another process has one of the files open, or another
+ * @return 0 on success, -EBUSY where one of the files is open through another session, or another
  * negative errno
  *
  * @errno
@@ -284,12 +293,14 @@ xnvme_fs_mkdir(struct xnvme_fs_session *s, const char *name);
 int
 xnvme_fs_rmdir(struct xnvme_fs_session *s, const char *name);
 /**
- * Removes the file 'name'; -EBUSY where another process has it open
+ * Removes the file 'name'; -EBUSY where the file is open through another session, of this process
+ * or of another
  *
  * @param s The session
  * @param name The name of the file in the pool
  *
- * @return 0 on success, -EBUSY where another process has the file open, or another negative errno
+ * @return 0 on success, -EBUSY where the file is open through another session, or another negative
+ * errno
  *
  * @errno
  */
@@ -399,8 +410,8 @@ xnvme_fs_submit(struct xnvme_fs_file *f, struct xnvme_fs_req *r, int write, void
 uint32_t
 xnvme_fs_block_size(struct xnvme_fs_session *s);
 /**
- * Memory the drives transfer to and from themselves, from the HOMI serving the pool, for
- * xnvme_fs_dma_free() to free; NULL with errno set where there is none
+ * Allocates 'nbytes' bytes of memory that the drives transfer data to and from directly, from the
+ * HOMI serving the pool, for xnvme_fs_dma_free() to free; NULL with errno set where there is none
  *
  * @param s The session
  * @param nbytes The number of bytes
@@ -420,11 +431,12 @@ xnvme_fs_dma_alloc(struct xnvme_fs_session *s, uint64_t nbytes);
 void
 xnvme_fs_dma_free(struct xnvme_fs_session *s, void *p);
 /**
- * Makes the dma-buf 'fd', another device's memory such as a GPU's, a direct read's destination
- * under the range of addresses at 'vaddr', of the dma-buf's size, which the caller reserves (an
- * mmap of PROT_NONE) and never touches. Returns -ENOTSUP where xnvme fs was built with an xNVMe
- * that does not register dma-bufs. The fd may be closed after; unregister before the exporter
- * frees the memory.
+ * Registers the dma-buf 'fd', memory of another device such as a GPU, as a destination of direct
+ * reads. The caller reserves a range of addresses of the dma-buf's size at 'vaddr', with an mmap
+ * of PROT_NONE, and never reads or writes through it; xnvme_fs_submit_direct() takes an address in
+ * that range for the corresponding byte of the dma-buf. Returns -ENOTSUP where xnvme fs was built
+ * with an xNVMe that does not register dma-bufs. The fd may be closed after the call; unregister
+ * before the exporter frees the memory.
  *
  * @param s The session
  * @param fd The dma-buf
@@ -451,10 +463,11 @@ xnvme_fs_register_dmabuf(struct xnvme_fs_session *s, int fd, void *vaddr);
 int
 xnvme_fs_unregister_dmabuf(struct xnvme_fs_session *s, void *vaddr);
 /**
- * Starts a read straight into 'dma', xnvme_fs_dma_alloc's memory or a registered dma-buf's,
- * without the CPU touching the bytes: whole blocks of what the file holds on the drives, no hole
- * nor appends held in memory, else the request fails with -EINVAL. Past the file's end, the last
- * block holds what the drive does, not zeros.
+ * Starts a read directly into 'dma', memory from xnvme_fs_dma_alloc() or of a registered dma-buf;
+ * the CPU neither reads nor writes the bytes. The range must be whole blocks that the file has on
+ * the drives, with no hole and no appends held in memory, else the request fails with -EINVAL.
+ * Where the file ends inside the last block, the rest of that block is what the drive holds, which
+ * need not be zeros.
  *
  * @param f The file
  * @param r The request, which is done or was never submitted
@@ -482,7 +495,7 @@ xnvme_fs_submit_direct(struct xnvme_fs_file *f, struct xnvme_fs_req *r, void *dm
 int
 xnvme_fs_poll(struct xnvme_fs_req *r, int *done);
 /**
- * Waits for the request; its result, the bytes moved, or a negative errno
+ * Waits until the request is done, and returns the number of bytes moved, or a negative errno
  *
  * @param r The request
  *

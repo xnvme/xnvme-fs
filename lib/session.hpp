@@ -29,12 +29,12 @@ struct Request {
 	void *buf = nullptr;
 	uint64_t nbytes = 0;
 	uint64_t offset = 0;
-	//! A read straight into 'buf', memory the drives transfer to themselves, Member::AllocDma's or a registered
-	//! dma-buf's, which the CPU never touches: whole blocks of the file's that lie on the drives, never a hole nor
-	//! appends held in memory, else it fails with EINVAL. Past the file's end, the last block holds what the drive
-	//! does, not zeros.
+	//! A read directly into 'buf', memory from Member::AllocDma or of a registered dma-buf; the CPU neither reads nor
+	//! writes the bytes. The range must be whole blocks that the file has on the drives, with no hole and no appends
+	//! held in memory, else the request fails with EINVAL. Where the file ends inside the last block, the rest of that
+	//! block is what the drive holds, which need not be zeros.
 	bool direct = false;
-	//! The caller's, untouched.
+	//! For the caller's use; the library neither reads nor writes it.
 	void *tag = nullptr;
 
 	bool done = false;
@@ -50,11 +50,11 @@ struct Request {
 
 //! Reaps what has completed for 'r' without waiting; returns whether it is done.
 bool Poll(Request &r);
-//! Waits until 'r' is done, as PacedWait does, learning from waits on requests of its size.
+//! Waits until 'r' is done, with PacedWait and the wait class of the request's size.
 void Wait(Request &r);
 
-//! A file open in this process, shared by every handle an engine has on its name: one daemon handle, one view of
-//! the size and the extents, as POSIX gives one inode to all of a process's descriptors. Safe to use from several
+//! A file open through a Session, shared by every handle an engine has on its name: one handle at the server, one
+//! size and one list of extents, as POSIX gives one inode to all of a process's descriptors. Safe to use from several
 //! threads; reads and writes of different ranges run concurrently.
 class File {
 public:
@@ -63,9 +63,9 @@ public:
 	File(const File &) = delete;
 	File &operator=(const File &) = delete;
 
-	//! Starts 'r': splits its range at extent boundaries and starts every piece on its member's queue, so a range
-	//! spanning members has all of them working at once. A write leases the extents it needs first. A hole, a range
-	//! of the file no extent backs, reads as zeros. Never throws; a failure completes 'r' with its errno.
+	//! Starts 'r': splits its range at extent boundaries and starts every piece on its member's queue, so the pieces
+	//! of a range that spans members are in flight together. A write leases the extents it needs first. A hole, a range
+	//! of the file no extent backs, reads as zeros. Throws no Error; a failure completes 'r' with its errno.
 	void Submit(Request &r);
 	//! Submit and Wait, for callers without anything to overlap. Reads return the bytes read, fewer at the end of
 	//! the file; both throw on failure.
@@ -94,8 +94,8 @@ private:
 	void Start(Request &r);
 	//! Called under 'lock'.
 	void LeaseTo(uint64_t end);
-	//! Whether an append of 'nbytes' stays in the stage until a sync rather than being written as it comes: only
-	//! with XNVME_FS_APPEND_BUFFER, and only below a command's size, which gains nothing from being held.
+	//! Whether an append of 'nbytes' stays in the stage until a sync instead of being written at once: only with
+	//! XNVME_FS_APPEND_BUFFER, and only where the append is smaller than one command.
 	bool Held(uint64_t nbytes) const;
 	//! Bytes past 'size' the stage holds that are not on the drive yet. Called under 'lock'.
 	uint64_t Pending() const;
@@ -103,7 +103,7 @@ private:
 	void LoadStage();
 	//! Copies an append into the stage, writing the stage out each time it fills. Called under 'lock'.
 	void Stage(const uint8_t *bytes, uint64_t nbytes);
-	//! Writes what the stage holds as whole blocks, synchronously, so two appends to one block can never land out
+	//! Writes what the stage holds as whole blocks, synchronously, so two appends to one block can never complete out
 	//! of order, then keeps the block holding the new end. Called under 'lock'.
 	void WriteStage();
 	//! Splits a range at extent boundaries. Called under 'lock'.
@@ -120,9 +120,9 @@ private:
 	std::vector<ExtentAddr> extents;
 	bool dirty = false;
 	//! DMA memory of one command's size holding the file from 'stage_at', the start of the block holding the end,
-	//! for 'stage_fill' bytes: that block as on the drive, then appends past 'size' not written yet, which only
-	//! XNVME_FS_APPEND_BUFFER leaves there and a dying process loses. Zero past 'stage_fill', so a write pads with
-	//! zeros. 'stage_at' is NO_STAGE when the block is not loaded. Under 'lock'.
+	//! for 'stage_fill' bytes: that block as on the drive, then appends past 'size' not written yet. Appends stay there
+	//! only with XNVME_FS_APPEND_BUFFER, and are lost when the process exits before writing them. Zero past
+	//! 'stage_fill', so a write pads with zeros. 'stage_at' is NO_STAGE when the block is not loaded. Under 'lock'.
 	static constexpr uint64_t NO_STAGE = UINT64_MAX;
 	uint8_t *stage = nullptr;
 	uint64_t stage_nbytes = 0;
@@ -139,11 +139,11 @@ public:
 
 	//! Opens 'name', sharing the File already open in this process if there is one.
 	std::shared_ptr<File> Open(const std::string &name, uint32_t flags);
-	//! The File open in this process under 'name', or null. Its size is the live one; the server knows a size only as
-	//! of the last commit, truncate or close.
+	//! The File open in this session under 'name', or null. Its size is the size in this process; the server has a
+	//! size only as of the last commit, truncate or close.
 	std::shared_ptr<File> Find(const std::string &name);
-	//! Keeps the process's shared files in step with a removal or rename done through the client. A File still open
-	//! under a name removed, or renamed onto, stays usable through its handles and is no longer found by name.
+	//! Removes 'name' from the session's open files, after a removal done through the client. A File still open under
+	//! a name removed, or renamed onto, stays usable through its handles and is no longer found by name.
 	void Forget(const std::string &name);
 	//! As Forget, for every file under 'directory', which the server's RMDIR removed.
 	void ForgetUnder(const std::string &directory);
@@ -173,7 +173,7 @@ private:
 	void Sample(const std::string &path);
 
 	std::vector<std::unique_ptr<Member>> members;
-	//! Runs with XNVME_FS_STATS set, until the session goes.
+	//! Runs Sample when XNVME_FS_STATS is set, until the Session is destroyed.
 	std::thread sampler;
 	std::atomic<bool> stop_sampling {false};
 	std::mutex files_lock;

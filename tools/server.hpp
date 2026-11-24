@@ -20,13 +20,13 @@ namespace xnvme_fs {
 //! both, through 'xnvme fs cp'.
 struct ServedFile {
 	std::string name;
-	//! What the owner last reported, and what the last commit made durable; only the latter reaches the drive.
+	//! 'size' is the size the owner last reported. 'durable' is the size of the last commit, which WriteTable writes.
 	uint64_t size = 0;
 	uint64_t durable = 0;
 	std::vector<ExtentAddr> extents;
-	//! In the table on the drive, or due there at the next table write. Set by a commit or a rename.
+	//! WriteTable writes the file's entry only when set. A commit or a rename sets it; FinishUnlink clears it.
 	bool persistent = false;
-	//! In the namespace. A removed file stays alive while handles hold it.
+	//! False once the file is removed from 'files'. The ServedFile exists until the last handle on it is closed.
 	bool linked = true;
 	int owner = -1;
 	int opens = 0;
@@ -43,26 +43,29 @@ public:
 	explicit Server(std::unique_ptr<Pool> pool);
 	~Server();
 
-	//! Logs every request that changes a file, and every failure, to stderr.
+	//! When set, Handle prints a line to stderr for each OPEN, CLOSE, LEASE, COMMIT, TRUNCATE, REMOVE, RENAME and
+	//! INDEX request and for each request that fails with an Error, and Disconnect prints one for each connection.
 	bool trace = false;
 
-	//! Handles one request from connection `fd` and returns the response body, or nothing for a request answered
-	//! later, a watch, whose response TakeReplies hands out.
+	//! Handles one request from connection `fd` and returns the response body, or an empty body for a WATCH that is
+	//! answered later, whose response TakeReplies returns.
 	std::vector<uint8_t> Handle(int fd, const std::vector<uint8_t> &request);
-	//! Responses to watches that came due, each with its connection, to send after every request.
+	//! Returns the responses that Changed queued for watches, each with its connection, for the caller to send.
 	std::vector<std::pair<int, std::vector<uint8_t>>> TakeReplies();
 	void Connect(int fd);
-	//! Closes the connection's handles and removes the files it created but never made persistent.
+	//! Closes the connection's handles and ends its read leases. A file that the connection created and never
+	//! committed stays in 'files'.
 	void Disconnect(int fd);
 
-	//! Mounts a read-only view of the pool at 'mountpoint', clearing a mount a dead daemon left there.
+	//! Mounts a read-only view of the pool at 'mountpoint', after unmounting what a server that was killed left there.
 	void OpenView(const std::string &mountpoint);
 	void CloseView();
 	//! The view's descriptor to poll, or -1 without one.
 	int ViewFd() const;
-	//! Answers one request from the kernel for the view; closes the view if it was unmounted from outside.
+	//! Answers one request from the kernel for the view. Closes the view when reading a request fails, as it does
+	//! after an unmount, and when the kernel's FUSE protocol is older than ufuse accepts.
 	void ServeView();
-	//! Has the kernel drop the view's cached attributes of 'name', whose size changed; nothing without a view.
+	//! Tells the kernel to drop its cached attributes of 'name', whose size changed. Does nothing without a view.
 	void ViewChanged(const std::string &name);
 
 private:
@@ -76,16 +79,19 @@ private:
 	void Free(ExtentAddr e);
 	//! Frees the held extents no read lease can name any more.
 	void FreeHeld();
-	//! Moves the index version on after a change to names, sizes or extents, answering the watches it makes stale.
+	//! Increments the index version after a change to names, sizes or extents, and queues a reply to every watch.
 	void Changed();
-	//! Drops a file's extents past the first `keep`. Extents the drive's table may name wait for the next write.
+	//! Removes a file's extents past the first `keep`. An extent of a persistent file goes to 'pending_free', which
+	//! WriteTable releases after the next table write; any other extent is released at once.
 	void Drop(ServedFile &file, uint64_t keep);
 	void TruncateFile(ServedFile &file, uint64_t size);
-	//! Takes the file out of the namespace; FinishUnlink frees it once a table without it is on the drive.
+	//! Removes the file from 'files'. FinishUnlink, called once a table without the file is on the drive, releases
+	//! the file's extents, or leaves them to the close of the file's last handle.
 	void Unlink(const std::shared_ptr<ServedFile> &file);
 	void FinishUnlink(const std::shared_ptr<ServedFile> &file);
 	void CheckOwner(const ServedFile &file, int fd);
-	//! Commits the namespace and the durable extent maps; exits the process if the drive refuses.
+	//! Writes the directories and the persistent files, each file with its durable size and its extents, as the next
+	//! generation of the table. Rethrows ENOSPC; on any other failure prints the error and exits the process.
 	void WriteTable();
 
 	bool IsDirectory(const std::string &name) const;

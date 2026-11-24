@@ -55,10 +55,10 @@ static auto Guard(F f) -> decltype(f()) {
 	}
 }
 
-//! Fails the call with EINVAL where the caller passed NULL for 'what'
 static_assert(XNVME_FS_NAME_MAX == xnvme_fs::MAX_FILE_NAME, "a name in the pool fits an entry");
 static_assert(sizeof(struct xnvme_fs_entry) == 272, "struct xnvme_fs_entry has no padding");
 
+//! Throws EINVAL where 'arg' is NULL; 'call' and 'what' name the call and the argument in the message
 static void Given(const void *arg, const char *call, const char *what) {
 	if (!arg) {
 		Fail(EINVAL, "xnvme fs: %s: '%s' is NULL", call, what);
@@ -152,7 +152,7 @@ int xnvme_fs_stat(struct xnvme_fs_session *s, const char *name, struct xnvme_fs_
 		auto found = s->session->client.StatName(name);
 		st->kind = found.kind;
 		st->size = found.size;
-		// The server knows a size as of the last commit; a file open here may be longer
+		// The server has the size it last received for the file; a file open in this session may be longer
 		if (auto file = s->session->Find(name)) {
 			st->size = file->Size();
 		}

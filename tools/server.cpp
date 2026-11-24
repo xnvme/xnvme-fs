@@ -263,7 +263,7 @@ void Server::CloseHandle(Conn &conn, uint64_t handle) {
 		return;
 	}
 	file->owner = -1;
-	// Extents leased past the end are given back with the last handle.
+	// The close of the last handle releases the extents leased past the file's size, and all extents of a removed file.
 	Drop(*file, file->linked ? ExtentsFor(file->size) : 0);
 }
 
@@ -283,8 +283,9 @@ void Server::Disconnect(int fd) {
 		l = l->second.fd == fd ? read_leases.erase(l) : std::next(l);
 	}
 	FreeHeld();
-	// A file its client never committed stays, readable by the next client, as a closed file stays in the page cache:
-	// what was written is on the drive, and only losing the server loses the map that names it
+	// A file that its client never committed stays in 'files' with the size the server last received, and another
+	// client can open and read it. The file's extent map is then in the server's memory only, and is lost when the
+	// server stops
 	conns.erase(it);
 }
 
@@ -404,8 +405,8 @@ void Server::Dispatch(int fd, Conn &conn, Reader &r, Writer &w) {
 			Fail(EINVAL, "xnvme fs: a lease is 1 to %u extents", MAX_LEASE);
 		}
 		auto got = Allocate(count);
-		// An extent holds what its last file left there; cleared, a range of the file nothing wrote reads as zeros,
-		// as POSIX has it, and no file sees another's data
+		// A leased extent still holds the data of the file that had it before. The server zeroes it, so that a range of
+		// the file that nothing wrote reads as zeros, as POSIX requires, and no file reads another file's data
 		try {
 			for (auto e : got) {
 				pool->GetMember(ExtentMember(e)).Zero(ExtentOffset(sb, e), sb.extent_size);

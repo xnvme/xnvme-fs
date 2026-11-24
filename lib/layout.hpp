@@ -43,7 +43,7 @@ inline uint64_t ExtentIndex(ExtentAddr e) {
 }
 
 //! The first SUPERBLOCK_SIZE bytes of every member, little-endian; the last four hold a CRC-32 of the rest.
-//! Every member reserves the same metadata area and data offset; only member 0's metadata area is used.
+//! Every member has the same slot size and data offset; only member 0's slots hold the table.
 struct Superblock {
 	uint32_t layout_version = LAYOUT_VERSION;
 	uint32_t member_index = 0;
@@ -75,7 +75,7 @@ struct Access {
 
 enum class EntryKind : uint8_t { FILE = 1, DIRECTORY = 2 };
 
-//! A file or directory as committed: its name, its durable size and its extents, file offset order.
+//! A file or directory as committed: its name, its durable size and its extents in the order of their file offsets.
 struct Entry {
 	std::string name;
 	EntryKind kind = EntryKind::FILE;
@@ -100,20 +100,22 @@ struct Completion {
 	void *arg = nullptr;
 };
 
-//! How long a thread's waits took is learned per class: one per power of two from 4 KiB for reads and writes of that
-//! size, and FINISH_CLASS for flushes and whatever else Member::Finish waits out.
+//! PacedWait keeps a moving average of the duration of a thread's waits per class. WaitClass gives the class of a
+//! read or a write by its size, one per power of two from 4 KiB; FINISH_CLASS is the class of a flush and of any
+//! other wait in Member::Finish.
 constexpr int FINISH_CLASS = 8;
 int WaitClass(uint64_t nbytes);
-//! Polls with 'done' until it returns true: paced unless XNVME_FS_POLL_MODE is 'spin', so a wait not over at once first
-//! sleeps for half of what this thread's waits of class 'cls' took, and the thread does not hold its core for the
-//! whole wait on the drive.
+//! Polls with 'done' until it returns true. Unless XNVME_FS_POLL_MODE is 'spin', a wait that is not done at the first
+//! poll first sleeps for half the average duration of this thread's waits of class 'cls', where that average is at
+//! least 10 us, so the thread does not occupy its core for the whole wait on the drive.
 void PacedWait(int cls, bool (*done)(void *arg), void *arg);
 
 class Drive;
 
 //! A pool member: one namespace or partition, or the drives of an md RAID 0 set, driven with NVM commands through
-//! xNVMe; any byte range may be asked for. Each thread drives a queue of its own on each drive, made on first use, so
-//! threads never wait on each other, and a request larger than one command has all its commands in flight at once.
+//! xNVMe; any byte range may be asked for. Each thread has a queue of its own on each drive, made on first use, so
+//! threads share no queue, and a request larger than one command has its commands in flight together, up to the
+//! queue's depth.
 class Member {
 public:
 	//! 'path' is a controller held by HOMI, "0000:84:00.0", or under a kernel backend a namespace's block device,
@@ -122,8 +124,8 @@ public:
 	//! partition alone. Or it is the drives of an md RAID 0 set joined by '+', "0000:82:00.0+0000:83:00.0" or
 	//! "/dev/ng0n1+/dev/ng1n1", in any order, each a whole drive or a partition of the type Linux RAID or
 	//! PARTITION_TYPE named as above; the member is then the set's array, which mdadm makes and inspects and xnvme fs
-	//! maps to the drives as the kernel's md driver does. Sets of another level, a reshape, drives of unequal size and
-	//! other md features are refused.
+	//! maps to the drives as the kernel's md driver does. The constructor throws for a set of another level, a reshape,
+	//! drives of unequal size and other md features.
 	Member(const std::string &path, const Access &access);
 	~Member();
 	Member(const Member &) = delete;
@@ -145,12 +147,13 @@ public:
 	//! the xNVMe built in cannot register dma-bufs.
 	void RegisterDmabuf(int fd, void *vaddr);
 	void UnregisterDmabuf(void *vaddr);
-	//! Start transferring whole blocks between the drive and 'dma', memory from AllocDma that must stay valid until
-	//! the commands complete. Nothing is copied or merged, the CPU never touching the bytes, so memory it cannot
-	//! reach, a device's registered with HOMI, takes the same path.
+	//! Starts a transfer of whole blocks between the drive and 'dma', memory from AllocDma or of a registered dma-buf,
+	//! which must stay valid until the commands complete. The bytes do not pass through a slot, so the CPU neither
+	//! reads nor writes them, and memory the CPU cannot access, such as a device's behind a dma-buf, is used the same
+	//! way.
 	void BeginReadDirect(void *dma, uint64_t nbytes, uint64_t offset, Completion *c = nullptr);
 	void BeginWriteDirect(const void *dma, uint64_t nbytes, uint64_t offset, Completion *c = nullptr);
-	//! The most one command moves, and so the most a slot holds.
+	//! The most bytes one command transfers.
 	uint64_t CommandBytes() const {
 		return chunk;
 	}
@@ -178,7 +181,7 @@ public:
 		std::atomic<uint64_t> write_bytes {0};
 		//! Reads that completed, by class and latency: bucket b counts those under 2^b microseconds, the last one the
 		//! rest. The class is the reads in flight at submission, itself included (1, 2-4, 5-16, more), plus
-		//! LATENCY_CLASSES / 2 when a write was in flight then, counting landed but unreaped ones.
+		//! LATENCY_CLASSES / 2 when a write was in flight then; a completed write counts until its thread reaps it.
 		static constexpr int LATENCY_CLASSES = 8, LATENCY_BUCKETS = 16;
 		std::atomic<uint64_t> read_latency[LATENCY_CLASSES][LATENCY_BUCKETS] = {};
 	};
@@ -234,8 +237,8 @@ struct MemberInfo {
 //! One or more members, each carrying a superblock that names the pool and lists all of them.
 class Pool {
 public:
-	//! Writes a superblock to every member and an empty table. Refuses members that already hold a superblock unless
-	//! `overwrite`.
+	//! Writes an empty table to member 0 and a superblock to every member. Throws EEXIST for a member that already
+	//! holds a superblock, unless `overwrite`.
 	static std::unique_ptr<Pool> Format(const std::string &name, const std::vector<std::string> &members,
 	                                    const Access &access, uint64_t extent_size, bool overwrite);
 	//! The superblock of one member, naming its pool and every member of it, as a mount reads it to open the pool.
@@ -268,8 +271,8 @@ private:
 	std::vector<std::unique_ptr<Member>> members;
 };
 
-//! Fails for a backend this build does not provide. There is one, "upcie": a controller held by HOMI and reached as
-//! its client, with no kernel driver in the data path.
+//! Fails unless 'backend' is "upcie", "io_uring", "io_uring_direct" or "io_uring_cmd". Under "upcie", a controller
+//! is held by HOMI and reached as its client, with no kernel driver in the data path.
 void ValidateBackend(const std::string &backend);
 //! Fails for an unknown backend, and for uPCIe without a HOMI id.
 void ValidateAccess(const Access &access);

@@ -19,7 +19,7 @@ void TraceOp(const char *op, const std::string &name, uint64_t offset = 0, uint6
 
 } // namespace xnvme_fs
 
-//! Traces only when tracing, so an untraced run builds no arguments
+//! Evaluates its arguments and calls TraceOp only when tracing is on
 #define XNVME_FS_TRACE(...)                                                                                             \
 	do {                                                                                                               \
 		if (::xnvme_fs::Tracing()) {                                                                                    \

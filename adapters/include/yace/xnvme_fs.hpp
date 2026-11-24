@@ -549,8 +549,7 @@ class session {
 	 * Names added, removed or renamed between two calls shift the offsets. Pass 'version' 0 on
 	 * the first call: it is set to the version of the pool's names, and a later call given
 	 * that version fails with -ESTALE once the names have changed, so the caller can start
-	 * over. The size of a file this process has open is the size it has here, as
-	 * xnvme_fs_stat() gives.
+	 * over. The size of an entry is the size that xnvme_fs_stat() gives for the name.
 	 *
 	 * @note In this signature: 'max' is the size of 'entries'; 'count' is the size of the part
 	 * of 'entries' returned; 'remaining' is returned.
@@ -577,22 +576,23 @@ class session {
 	mkdir(const std::string &name);
 
 	/**
-	 * Removes the directory 'name' and every file and directory under it; -EBUSY where another
-	 * process has one of the files open
+	 * Removes the directory 'name' and every file and directory under it; -EBUSY where one of
+	 * the files is open through another session, of this process or of another
 	 *
 	 * @param name The name of the directory in the pool
-	 * @throws std::system_error xnvme_fs_rmdir() returns: 0 on success, -EBUSY where another
-	 * process has one of the files open, or another negative errno
+	 * @throws std::system_error xnvme_fs_rmdir() returns: 0 on success, -EBUSY where one of
+	 * the files is open through another session, or another negative errno
 	 */
 	void
 	rmdir(const std::string &name);
 
 	/**
-	 * Removes the file 'name'; -EBUSY where another process has it open
+	 * Removes the file 'name'; -EBUSY where the file is open through another session, of this
+	 * process or of another
 	 *
 	 * @param name The name of the file in the pool
-	 * @throws std::system_error xnvme_fs_remove() returns: 0 on success, -EBUSY where another
-	 * process has the file open, or another negative errno
+	 * @throws std::system_error xnvme_fs_remove() returns: 0 on success, -EBUSY where the file
+	 * is open through another session, or another negative errno
 	 */
 	void
 	remove(const std::string &name);
@@ -643,8 +643,9 @@ class session {
 	block_size();
 
 	/**
-	 * Memory the drives transfer to and from themselves, from the HOMI serving the pool, for
-	 * xnvme_fs_dma_free() to free; NULL with errno set where there is none
+	 * Allocates 'nbytes' bytes of memory that the drives transfer data to and from directly,
+	 * from the HOMI serving the pool, for xnvme_fs_dma_free() to free; NULL with errno set
+	 * where there is none
 	 *
 	 * @param nbytes The number of bytes
 	 * @return The memory, NULL with errno set where there is none
@@ -661,11 +662,13 @@ class session {
 	dma_free(void *p);
 
 	/**
-	 * Makes the dma-buf 'fd', another device's memory such as a GPU's, a direct read's
-	 * destination under the range of addresses at 'vaddr', of the dma-buf's size, which the
-	 * caller reserves (an mmap of PROT_NONE) and never touches. Returns -ENOTSUP where xnvme
-	 * fs was built with an xNVMe that does not register dma-bufs. The fd may be closed after;
-	 * unregister before the exporter frees the memory.
+	 * Registers the dma-buf 'fd', memory of another device such as a GPU, as a destination of
+	 * direct reads. The caller reserves a range of addresses of the dma-buf's size at 'vaddr',
+	 * with an mmap of PROT_NONE, and never reads or writes through it;
+	 * xnvme_fs_submit_direct() takes an address in that range for the corresponding byte of
+	 * the dma-buf. Returns -ENOTSUP where xnvme fs was built with an xNVMe that does not
+	 * register dma-bufs. The fd may be closed after the call; unregister before the exporter
+	 * frees the memory.
 	 *
 	 * @param fd The dma-buf
 	 * @param vaddr The start of the range of addresses reserved for the dma-buf
@@ -791,10 +794,11 @@ class file {
 	submit(req &r, int write, void *buf, uint64_t nbytes, uint64_t offset);
 
 	/**
-	 * Starts a read straight into 'dma', xnvme_fs_dma_alloc's memory or a registered
-	 * dma-buf's, without the CPU touching the bytes: whole blocks of what the file holds on
-	 * the drives, no hole nor appends held in memory, else the request fails with -EINVAL.
-	 * Past the file's end, the last block holds what the drive does, not zeros.
+	 * Starts a read directly into 'dma', memory from xnvme_fs_dma_alloc() or of a registered
+	 * dma-buf; the CPU neither reads nor writes the bytes. The range must be whole blocks that
+	 * the file has on the drives, with no hole and no appends held in memory, else the request
+	 * fails with -EINVAL. Where the file ends inside the last block, the rest of that block is
+	 * what the drive holds, which need not be zeros.
 	 *
 	 * @param r The request, which is done or was never submitted
 	 * @param dma Where the blocks are read to, once the request is done
@@ -852,7 +856,8 @@ class req {
 	poll();
 
 	/**
-	 * Waits for the request; its result, the bytes moved, or a negative errno
+	 * Waits until the request is done, and returns the number of bytes moved, or a negative
+	 * errno
 	 *
 	 * @throws std::system_error xnvme_fs_wait() returns: The number of bytes moved, or a
 	 * negative errno

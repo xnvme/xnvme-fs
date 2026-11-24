@@ -35,8 +35,9 @@ enum class Op : uint8_t {
 	REMOVE,
 	RENAME,
 	INFO,
-	//! For a reader outside the engines, one that reads files the engines write, as xal does for OpenDS: every
-	//! file's extents under a read lease, a request answered once the index is stale, and the lease's end.
+	//! INDEX, WATCH and RELEASE serve a reader that is not an engine and reads the files the engines write: INDEX
+	//! returns every file's extents under a read lease, WATCH is answered once the index is stale, RELEASE ends the
+	//! lease.
 	INDEX,
 	WATCH,
 	RELEASE,
@@ -70,7 +71,7 @@ struct Stat {
 struct Listed {
 	std::string name;
 	EntryKind kind;
-	//! A file's size as of its last commit; 0 for a directory.
+	//! The size the server holds for a file, which is the last size it received; 0 for a directory.
 	uint64_t size;
 };
 
@@ -101,8 +102,8 @@ struct IndexedFile {
 	std::vector<ExtentAddr> extents;
 };
 
-//! The pool's files as one version of it has them, held by a read lease: while the lease is held, the server gives
-//! no extent the index names to another file.
+//! The pool's files as one version of it has them, held by a read lease: while the lease is held, the server
+//! allocates no extent the index names to another file.
 struct Index {
 	uint64_t lease;
 	uint64_t version;
@@ -154,12 +155,12 @@ public:
 	void Rename(const std::string &from, const std::string &to);
 	PoolStats Info();
 	Index MakeIndex();
-	//! Returns once the index of the lease is stale, with the version that made it so; a client waits on a
-	//! connection of its own, which this holds meanwhile.
+	//! Returns once the index of the lease is stale, with the version that made it so. Watch holds the Client's lock
+	//! until then, so a client calls it on a connection it uses for nothing else.
 	uint64_t Watch(uint64_t lease);
 	void Release(uint64_t lease);
 
-	//! False once the connection has failed; a broken client is replaced, not repaired.
+	//! False once the connection has failed. A failed Client does not reconnect; its owner makes a new one.
 	bool Alive() const {
 		return fd >= 0;
 	}

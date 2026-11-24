@@ -166,12 +166,12 @@ void File::Start(Request &r) {
 			}
 			at += p.nbytes;
 		}
-		// xNVMe's upcie queues hold a command until polled: the drives get them now, not once waited on
+		// xNVMe's upcie queues hold a command until polled, so polling here starts the commands before the caller waits
 		for (auto m : r.members) {
 			m->Poke();
 		}
 	} catch (Error &err) {
-		// What was started writes into the caller's buffer, so it completes before the request does
+		// The commands already started write into the caller's buffer, so they must complete before the request does
 		for (auto m : r.members) {
 			try {
 				m->Finish();
@@ -282,7 +282,7 @@ void File::WriteStage() {
 			at += p.nbytes;
 		}
 	} catch (Error &) {
-		// Commands already started report to 'c', so they complete before it goes
+		// Commands already started report to 'c', so they must complete before 'c' goes out of scope
 		for (auto m : used) {
 			try {
 				m->Finish();
@@ -311,7 +311,8 @@ void File::WriteStage() {
 		     (unsigned long long)stage_at, name.c_str(), c.why.c_str());
 	}
 	size = stage_at + stage_fill;
-	// The block holding the new end stays, moved to the front: less than a block, once per write of the stage
+	// The block holding the new end stays in the stage, moved to its start: a move of less than a block, once per write
+	// of the stage
 	uint64_t keep = size / bs * bs - stage_at;
 	if (keep) {
 		uint64_t head = stage_fill - keep;
@@ -390,7 +391,8 @@ void File::Truncate(uint64_t new_size) {
 	XNVME_FS_TRACE("truncate", Name(), new_size);
 	std::lock_guard<std::mutex> guard(lock);
 	WriteStage();
-	// The extent holding the new end keeps what lay past it; cleared, a later write beyond leaves zeros in between
+	// The extent that holds the new end still holds the bytes past it. They are zeroed, so that after a later write
+	// beyond the new end the bytes in between read as zeros
 	auto es = session->extent_size;
 	auto index = new_size / es;
 	if (new_size < size && new_size % es && index < extents.size()) {
