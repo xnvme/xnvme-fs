@@ -22,13 +22,13 @@ defaults:
     shell: bash
 
 # XNVME_REPOSITORY and XNVME_REF name the xNVMe that xnvme fs builds against and installs its extension into; no
-# other file names them. The branch api-pass of safl/xnvme adds to xNVMe's main the commit "feat(cli): let other
-# projects extend the commands of xnvme", and the spec headers and command preps that lib/layout.cpp uses.
+# other file names them. XNVME_REF is a commit of the branch wip of safl/xnvme and not the branch, because wip is
+# rebased; the tag wip-pin-20261122b on safl/xnvme keeps the commit fetchable.
 # BUILD_IMAGE is xNVMe's image with its dependencies for Ubuntu 26.04. DEVENV_IMAGE is the host container of the
 # xnvme-devenv release that xNVMe v0.8.0 pins.
 env:
   XNVME_REPOSITORY: safl/xnvme
-  XNVME_REF: api-pass
+  XNVME_REF: f38cb5158ea00fdef7199cd1578f6c97795c5de5
   BUILD_IMAGE: ghcr.io/xnvme/xnvme/distro-deps-ubuntu-resolute:main
   DEVENV_IMAGE: ghcr.io/xnvme/xnvme-devenv/host:v0.15.0
 

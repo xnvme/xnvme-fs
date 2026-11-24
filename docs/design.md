@@ -44,8 +44,8 @@ xnvme fs demonstrates the AiSIO architecture. In AiSIO, several independent
 processes share NVMe controllers. One process owns each controller, and every
 process submits commands on I/O queues of its own.
 
-xnvme fs builds against the branch `api-pass` of xNVMe, whose uPCIe backend
-has that control plane. `xnvme homi serve BDF --be upcie --homi-id N` owns a
+xnvme fs builds against a commit of the branch `wip` of safl/xnvme, whose
+uPCIe backend has that control plane. `xnvme homi serve BDF --be upcie --homi-id N` owns a
 controller: the device, its DMA memory and its admin queue. The HOMI server
 serves clients on `/tmp/xnvme-homi-N.sock`. A client opens the same device
 with `--be upcie --homi-id N` and gets queues of its own. The open fails with
@@ -498,8 +498,8 @@ client must unregister before the driver frees the buffer, since the driver
 cannot revoke a dma-buf it has exported.
 
 `xnvme_fs_register_dmabuf()` returns `-ENOTSUP` when xnvme fs was built with
-an xNVMe that does not register dma-bufs. The branch `api-pass` of xNVMe
-registers them, with `xnvme_buf_register_dmabuf()`.
+an xNVMe that does not register dma-bufs. The commit of xNVMe that xnvme fs
+builds against registers them, with `xnvme_buf_register_dmabuf()`.
 
 ## The library and the programs
 

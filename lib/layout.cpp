@@ -597,7 +597,6 @@ static void Submit(Drive::ThreadQueue &q, uint32_t slot, uint8_t opc, uint32_t n
 	int err;
 	if (opc == XNVME_SPEC_IO_FLUSH_OPCODE) {
 		xnvme_cmd_prep_io_flush_args args = {};
-		args.args_nbytes = sizeof(args);
 		args.nsid = nsid;
 		err = xnvme_cmd_prep_io_flush(&ctx->cmd, &args);
 		if (!err) {
@@ -605,7 +604,6 @@ static void Submit(Drive::ThreadQueue &q, uint32_t slot, uint8_t opc, uint32_t n
 		}
 	} else if (opc == XNVME_SPEC_NVM_WRITE_ZEROES_OPCODE) {
 		xnvme_cmd_prep_nvm_write_zeroes_args args = {};
-		args.args_nbytes = sizeof(args);
 		args.nsid = nsid;
 		args.slba = offset / lba_nbytes;
 		args.nlb = uint16_t(nbytes / lba_nbytes - 1);
@@ -619,14 +617,12 @@ static void Submit(Drive::ThreadQueue &q, uint32_t slot, uint8_t opc, uint32_t n
 		auto buf = data ? data : q.Slot(slot);
 		if (opc == XNVME_SPEC_NVM_WRITE_OPCODE) {
 			xnvme_cmd_prep_nvm_write_args args = {};
-			args.args_nbytes = sizeof(args);
 			args.nsid = nsid;
 			args.slba = slba;
 			args.nlb = nlb;
 			err = xnvme_cmd_prep_nvm_write(&ctx->cmd, &args);
 		} else {
 			xnvme_cmd_prep_nvm_read_args args = {};
-			args.args_nbytes = sizeof(args);
 			args.nsid = nsid;
 			args.slba = slba;
 			args.nlb = nlb;

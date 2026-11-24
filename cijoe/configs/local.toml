@@ -10,8 +10,8 @@
 tree = "{{ local.env.XNVME_FS_TREE }}"
 
 [xnvme_fs.source]
-# The xNVMe checkout to build. It must be on the branch api-pass of safl/xnvme, which has the commit that lets
-# other projects extend the commands of xnvme. xnvme fs and the adapters are built from the checkout that holds
+# The xNVMe checkout to build. It must be at the commit of safl/xnvme's wip that
+# .github/workflows/verify-emulated.yml pins. xnvme fs and the adapters are built from the checkout that holds
 # this file.
 xnvme = "{{ local.env.get('XNVME_FS_XNVME', local.env.HOME + '/git/xnvme') }}"
 

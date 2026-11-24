@@ -41,12 +41,11 @@ prints lists `xnvme fs`.
 xnvme fs is a meson project in C and C++17, for Linux. The build finds xNVMe
 by pkg-config and takes uFuse v0.4 as a meson wrap.
 
-xnvme fs needs the branch `api-pass` of github.com/safl/xnvme. No release of
-xNVMe has the content of that branch yet. The branch has the commit
-"feat(cli): let other projects extend the commands of xnvme". It also has the
-spec headers and command preps that libxnvme-fs uses to build NVMe commands
-and to read their completions. libxnvme-fs does not compile against an xNVMe
-without them.
+xnvme fs needs xNVMe at the commit that `XNVME_REF` in
+`.github/workflows/verify-emulated.yml` pins, a commit of the branch `wip` of
+github.com/safl/xnvme. No release of xNVMe has that commit yet. libxnvme-fs
+does not compile against an xNVMe without its spec headers, its command preps
+and `xnvme_buf_register_dmabuf()`.
 
 With xNVMe installed in `$PREFIX`:
 

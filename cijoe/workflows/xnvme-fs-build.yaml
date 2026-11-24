@@ -5,8 +5,8 @@ doc: |
   Build xNVMe, xnvme fs and the adapters on this machine, for workflows/xnvme-fs-guest.yaml to test.
 
   The step xnvme_fs_build builds in XNVME_FS_TREE. It builds xNVMe from the checkout that XNVME_FS_XNVME names, by
-  default ~/git/xnvme, which must be on the branch api-pass of safl/xnvme, and installs it into a prefix in the
-  tree. It builds xnvme fs from this checkout and installs it into the same prefix. Against that prefix it builds
+  default ~/git/xnvme, which must be at the commit of safl/xnvme's wip that .github/workflows/verify-emulated.yml
+  pins, and installs it into a prefix in the tree. It builds xnvme fs from this checkout and installs it into the same prefix. Against that prefix it builds
   DuckDB with the extension and its tests, and RocksDB with the plugin.
 
   The machine needs xNVMe's dependencies and the packages that adapters/scripts/ci-deps.sh installs. xNVMe's image

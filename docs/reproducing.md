@@ -15,10 +15,9 @@ its submodules:
 
     git submodule update --init adapters/duckdb adapters/extension-ci-tools adapters/third_party/rocksdb
 
-The commands also need a checkout of the branch `api-pass` of
-github.com/safl/xnvme, which has the commit "feat(cli): let other projects
-extend the commands of xnvme". `XNVME_FS_XNVME` names that checkout when it
-is not at `~/git/xnvme`.
+The commands also need a checkout of github.com/safl/xnvme at the commit that
+`XNVME_REF` in `.github/workflows/verify-emulated.yml` pins. `XNVME_FS_XNVME`
+names that checkout when it is not at `~/git/xnvme`.
 
 ## What you need
 

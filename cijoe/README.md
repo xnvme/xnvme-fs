@@ -19,9 +19,8 @@ source with one step, `xnvme_fs_build`. The step copies two checkouts from
 the machine that runs cijoe to the host, in the state they are checked out:
 
 * xNVMe, from the checkout that `XNVME_FS_XNVME` names, by default
-  `~/git/xnvme`. The checkout must be on the branch `api-pass` of
-  github.com/safl/xnvme, which has the commit "feat(cli): let other projects
-  extend the commands of xnvme".
+  `~/git/xnvme`. The checkout must be at the commit that `XNVME_REF` in
+  `.github/workflows/verify-emulated.yml` pins.
 * xnvme fs with its adapters, from this checkout with its submodules.
 
 Initialize the submodules with the command below. The submodules need their
