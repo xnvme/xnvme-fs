@@ -35,8 +35,7 @@ design names and the code does not implement.
 
 The following are not goals: a general-purpose file system, Parquet and CSV
 files on the drives (they stay on a regular file system), engines other than
-DuckDB and RocksDB, a writable FUSE view, several pools in one DuckDB
-process, and drives other than NVMe drives.
+DuckDB and RocksDB, a writable FUSE view, and drives other than NVMe drives.
 
 ## Architecture: AiSIO with HOMI
 
