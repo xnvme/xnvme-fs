@@ -5,7 +5,7 @@
 name: verify-emulated
 
 # Called by 'verify'. The job builds xNVMe, xnvme fs and the adapters in a container of BUILD_IMAGE, and runs the
-# adapters' test suites in the guest of xnvme-devenv, which a container of DEVENV_IMAGE boots with the rig of
+# adapters' test suites in the guest of systems-devenv, which a container of DEVENV_IMAGE boots with the rig of
 # cijoe/configs/qemu-guest.toml. Both containers mount the workspace and /mnt/xnvme-fs at the paths these have on
 # the runner, so the second container finds the build tree where the first wrote it. The build and the suites are
 # one job, since the build tree is several GB.
@@ -25,12 +25,12 @@ defaults:
 # other file names them. XNVME_REF is a commit of the branch wip of safl/xnvme and not the branch, because wip is
 # rebased; the tag wip-pin-20261122b on safl/xnvme keeps the commit fetchable.
 # BUILD_IMAGE is xNVMe's image with its dependencies for Ubuntu 26.04. DEVENV_IMAGE is the host container of the
-# xnvme-devenv release that xNVMe v0.8.0 pins.
+# systems-devenv release that the wip branch of safl/xnvme pins.
 env:
   XNVME_REPOSITORY: safl/xnvme
   XNVME_REF: f38cb5158ea00fdef7199cd1578f6c97795c5de5
   BUILD_IMAGE: ghcr.io/xnvme/xnvme/distro-deps-ubuntu-resolute:main
-  DEVENV_IMAGE: ghcr.io/xnvme/xnvme-devenv/host:v0.15.0
+  DEVENV_IMAGE: ghcr.io/refenv/systems-devenv/host:v0.19.0
 
 jobs:
   # A pull request restores only its own caches and those of main, so the run on a push to main builds and saves
@@ -104,7 +104,7 @@ jobs:
             meson test -C /mnt/xnvme-fs/build-fs --print-errorlogs'
       # The suites of the file system itself, cijoe/tests/test_fs.py, need four controllers and root in the guest;
       # this job does not run them
-      - name: Run the test suites in xnvme-devenv's guest
+      - name: Run the test suites in systems-devenv's guest
         if: inputs.suites
         run: >-
           $RUN --privileged -w "$GITHUB_WORKSPACE/cijoe" "$DEVENV_IMAGE"

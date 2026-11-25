@@ -5,7 +5,7 @@ doc: |
   Run the adapters' test suites in a QEMU guest with two emulated NVMe controllers, first through uPCIe and HOMI,
   then through the kernel's backends.
 
-  The workflow boots the guest of xnvme-devenv with an IOMMU and the two controllers, records the system, and binds
+  The workflow boots the guest of systems-devenv with an IOMMU and the two controllers, records the system, and binds
   the controllers to vfio-pci inside the guest. From the tree that workflows/xnvme-fs-build.yaml built on this host,
   it copies the prefix of xNVMe and xnvme fs and the adapters' binaries and test data into the guest. It starts
   'xnvme homi serve' on the controllers and runs each suite as one step, on a pool with the two controllers as
@@ -17,12 +17,12 @@ doc: |
   does not, and io_uring_cmd, which passes NVMe commands through.
 
   A failed suite does not stop the suites after it. The workflow does not run the suites of the file system itself,
-  cijoe/tests/test_fs.py. Run the workflow in the host container of xnvme-devenv, on a machine with KVM and a built
+  cijoe/tests/test_fs.py. Run the workflow in the host container of systems-devenv, on a machine with KVM and a built
   tree; docs/reproducing.md has the command.
 
 steps:
 - name: guest_kill
-  uses: xnvme_devenv.rig_guest_kill
+  uses: systems_devenv.rig_guest_kill
   with:
     guest_name: "{{ config.qemu.default_guest }}"
 
@@ -38,7 +38,7 @@ steps:
     system_image_name: "{{ config.qemu.default_systemimage }}"
 
 - name: guest_start
-  uses: xnvme_devenv.rig_guest_start
+  uses: systems_devenv.rig_guest_start
   with:
     guest_name: "{{ config.qemu.default_guest }}"
     timeout: 300
@@ -178,6 +178,6 @@ steps:
     backend: io_uring_cmd
 
 - name: guest_stop
-  uses: xnvme_devenv.rig_guest_kill
+  uses: systems_devenv.rig_guest_kill
   with:
     guest_name: "{{ config.qemu.default_guest }}"

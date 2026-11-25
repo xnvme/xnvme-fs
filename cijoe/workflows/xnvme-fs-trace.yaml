@@ -17,7 +17,7 @@ doc: |
 
 steps:
 - name: guest_kill
-  uses: xnvme_devenv.rig_guest_kill
+  uses: systems_devenv.rig_guest_kill
   with:
     guest_name: "{{ config.qemu.default_guest }}"
 
@@ -33,7 +33,7 @@ steps:
     system_image_name: "{{ config.qemu.default_systemimage }}"
 
 - name: guest_start
-  uses: xnvme_devenv.rig_guest_start
+  uses: systems_devenv.rig_guest_start
   with:
     guest_name: "{{ config.qemu.default_guest }}"
     timeout: 300
@@ -61,6 +61,6 @@ steps:
     action: stop
 
 - name: guest_stop
-  uses: xnvme_devenv.rig_guest_kill
+  uses: systems_devenv.rig_guest_kill
   with:
     guest_name: "{{ config.qemu.default_guest }}"
