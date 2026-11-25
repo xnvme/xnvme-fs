@@ -24,8 +24,8 @@ names that checkout when it is not at `~/git/xnvme`.
 Building and checking correctness need one Linux machine on x86-64 with KVM,
 docker, and about 30 GB of local disk. The build runs in xNVMe's image with
 its dependencies for Ubuntu 26.04. The tests run in the host container of
-xnvme-devenv, as they do in CI. The tests need no NVMe drive and write to
-none: they run inside the QEMU guest of xnvme-devenv, whose NVMe controllers
+systems-devenv, as they do in CI. The tests need no NVMe drive and write to
+none: they run inside the QEMU guest of systems-devenv, whose NVMe controllers
 are emulated.
 
 ## 1. Build
@@ -55,10 +55,10 @@ workflow keeps that tree and builds nothing.
 
     docker run --rm --privileged -v $PWD/..:$PWD/.. -v $HOME/.cache/xnvme-fs:$HOME/.cache/xnvme-fs -w $PWD \
       -e XNVME_FS_TREE=$HOME/.cache/xnvme-fs/tree -e XNVME_FS_GUEST_ROOT=$HOME/.cache/xnvme-fs/guest \
-      ghcr.io/xnvme/xnvme-devenv/host:v0.15.0 \
+      ghcr.io/refenv/systems-devenv/host:v0.19.0 \
       cijoe workflows/xnvme-fs-guest.yaml -c configs/qemu-guest.toml -o cijoe-output-guest --skip-report
 
-The workflow boots the Ubuntu 26.10 guest of xnvme-devenv with an IOMMU and
+The workflow boots the Ubuntu 26.10 guest of systems-devenv with an IOMMU and
 two emulated NVMe controllers. Inside the guest it binds the controllers to
 vfio-pci and starts `xnvme homi serve` on them. It then runs each test suite
 as a step of its own, on a pool of both controllers that `xnvme fs serve`

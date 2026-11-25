@@ -5,11 +5,11 @@
 # a drive to spare, and in CI. The guest has an IOMMU, so its controllers can be bound to vfio-pci inside it.
 #
 # The images are written under XNVME_FS_GUEST_ROOT, which must be local storage (/mnt on a GitHub runner), not a
-# network file system. The guest image and the scripts that boot it with the rig below are xnvme-devenv's, so the
-# workflows run in the host container of xnvme-devenv, which has QEMU, oras and cijoe. The release of xnvme-devenv
-# is the one that xNVMe v0.8.0 pins.
+# network file system. The guest image and the scripts that boot it with the rig below are systems-devenv's, so the
+# workflows run in the host container of systems-devenv, which has QEMU, oras and cijoe. The release of systems-devenv
+# is the one that the wip branch of safl/xnvme pins.
 #
-# The guest is xnvme-devenv's Ubuntu 26.10 image. Its kernel has IOMMUFD and the device cdevs of vfio, so uPCIe uses
+# The guest is systems-devenv's Ubuntu 26.10 image. Its kernel has IOMMUFD and the device cdevs of vfio, so uPCIe uses
 # iommufd. The root account of the image is locked, so the workflows log in as the user 'odus' and use sudo.
 
 [cijoe.transport.guest]
@@ -38,10 +38,10 @@ system_args.tcp_forward = {host = 4210, guest = 22}
 
 [system-imaging.images.ubuntu-2610-devenv-x86_64]
 system_label = "x86_64"
-oras.url = "oras://ghcr.io/xnvme/xnvme-devenv/guest-ubuntu-2610:v0.15.0"
-disk.path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/system_imaging/ubuntu-2610-devenv-x86_64.qcow2"
+oras.url = "oras://ghcr.io/refenv/systems-devenv/guest-ubuntu-2610:v0.19.0"
+disk.path = "{{ local.env.XNVME_FS_GUEST_ROOT }}/system_imaging/ubuntu-2610-devenv-v0.19.0-x86_64.qcow2"
 
-# The rig that rig_guest_start of xnvme-devenv reads: two NVM controllers, each with one namespace of 4 KiB blocks.
+# The rig that rig_guest_start of systems-devenv reads: two NVM controllers, each with one namespace of 4 KiB blocks.
 # Each controller is on a PCIe root port of its own, so the guest enumerates them as 0000:01:00.0 and 0000:02:00.0.
 # The backing images are sparse raw files next to the guest image. cache=none makes QEMU open them with O_DIRECT, so
 # a flush in the guest reaches the host's disk. The size defaults to 8G, since DuckDB's storage tests fill most of

@@ -99,7 +99,7 @@ jobs:
   source-checks:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
-    container: ghcr.io/xnvme/xnvme-devenv/host:v0.15.0
+    container: ghcr.io/refenv/systems-devenv/host:v0.19.0
     steps:
       # adapters/.clang-format is a symbolic link into the DuckDB submodule
       - uses: actions/checkout@v4
@@ -122,7 +122,7 @@ jobs:
   docgen-shallow:
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-26.04
-    container: ghcr.io/xnvme/xnvme-devenv/host:v0.15.0
+    container: ghcr.io/refenv/systems-devenv/host:v0.19.0
     steps:
       - uses: actions/checkout@v4
       - name: Build the documentation

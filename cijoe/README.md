@@ -57,14 +57,14 @@ step builds gflags v2.2.2 into the tree.
 
 The workflow `xnvme-fs-guest` runs the test suites of the adapters through
 uPCIe and HOMI without a physical drive. It boots the QEMU guest of
-xnvme-devenv, Ubuntu 26.10, with an IOMMU and two emulated NVMe controllers.
+systems-devenv, Ubuntu 26.10, with an IOMMU and two emulated NVMe controllers.
 The members of the pool are the two controllers. They are bound to vfio-pci
 inside the guest and served by `xnvme homi serve`. `xnvme fs serve`, DuckDB
 and RocksDB are clients of that HOMI server.
 
 The prefix of xNVMe, the binaries and the test data come from a tree that
 `xnvme-fs-build` built in xNVMe's image with its dependencies for Ubuntu
-26.04. The workflow runs in the host container of xnvme-devenv, which has
+26.04. The workflow runs in the host container of systems-devenv, which has
 QEMU, oras and cijoe. `configs/qemu-guest.toml` describes the guest and its
 controllers. The machine needs KVM, docker, and local storage for the tree
 and the images. `docs/reproducing.md` has the commands, which are the ones
